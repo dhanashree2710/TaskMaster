@@ -207,11 +207,26 @@ async function checkIn(profile) {
 async function checkOut(profile) {
   if (!ATT_TODAY) return;
   const now = new Date();
-  const inTime = new Date(ATT_TODAY.check_in);
+
+  // Re-read the row's check_in fresh from the database right before doing
+  // the math. Using the in-memory ATT_TODAY.check_in here caused a real
+  // bug: if the row's check-in time had just been corrected via the Edit
+  // modal a moment earlier, ATT_TODAY could still hold the old check-in
+  // time, so "working hours" was calculated against the wrong start time
+  // even though the displayed check-in/check-out looked only a minute
+  // apart.
+  const { data: fresh, error: fetchError } = await sb
+    .from('attendance')
+    .select('check_in, status')
+    .eq('attendance_id', ATT_TODAY.attendance_id)
+    .maybeSingle();
+  if (fetchError || !fresh?.check_in) return showToast('Could not read your check-in time. Try refreshing.', 'error');
+
+  const inTime = new Date(fresh.check_in);
   const hours = Math.max(0, (now - inTime) / 3600000).toFixed(2);
   const { error } = await sb
     .from('attendance')
-    .update({ check_out: now.toISOString(), working_hours: hours, status: hours < 4 ? 'Half Day' : ATT_TODAY.status })
+    .update({ check_out: now.toISOString(), working_hours: hours, status: hours < 4 ? 'Half Day' : fresh.status })
     .eq('attendance_id', ATT_TODAY.attendance_id);
   if (error) return showToast(error.message, 'error');
   showToast('Checked out. See you tomorrow!', 'success');

@@ -33,6 +33,7 @@ function renderReportsSection() {
       <div class="filter-bar">
         <select class="form-select-tm" id="rep-task-scope" style="display:none;"><option value="all">Employees &amp; interns</option><option value="Employee">Employees only</option><option value="Intern">Interns only</option></select>
         <span class="filter-count" id="rep-task-count"></span>
+        <button class="btn-sm-ghost" id="rep-task-download-btn" style="margin-left:auto;"><i class="fa-solid fa-download"></i> Download CSV</button>
       </div>
       <div class="glass-card mb-3" style="padding:1.2rem;">
         <canvas id="rep-task-chart" height="110"></canvas>
@@ -60,6 +61,8 @@ async function initReports(profile) {
     });
   });
 
+  document.getElementById('rep-task-download-btn').addEventListener('click', () => downloadTaskReportCsv(profile, canManage));
+
   if (canManage) {
     const users = await fetchActiveUsers();
     const sel = document.getElementById('rep-filter-user');
@@ -80,6 +83,46 @@ async function initReports(profile) {
 let REP_TASK_CHART = null;
 const TASK_STATUS_ORDER = ['Pending', 'In Progress', 'Completed', 'Overdue'];
 const TASK_STATUS_COLORS = { Pending: '#4fb0ff', 'In Progress': '#ffb648', Completed: '#2fd889', Overdue: '#ff5c72' };
+
+function csvEscape(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadTaskReportCsv(profile, canManage) {
+  const scope = document.getElementById('rep-task-scope')?.value || 'all';
+  const tasks = (typeof TASKS_CACHE !== 'undefined' ? TASKS_CACHE : []).filter((t) => {
+    if (!canManage) return t.assigned_to === profile.user_id;
+    if (scope === 'all') return true;
+    return t.assignee?.role === scope;
+  });
+
+  if (!tasks.length) return showToast('No tasks to export for this view.', 'error');
+
+  const header = ['Person', 'Role', 'Task', 'Priority', 'Status', 'Due date', 'Progress %', 'Assigned by'];
+  const rows = tasks.map((t) => [
+    t.assignee?.user_name || 'Unassigned',
+    t.assignee?.role || '-',
+    t.title || '',
+    t.priority || '-',
+    t.status || '-',
+    t.due_date || '-',
+    t.progress || 0,
+    t.assigner?.user_name || '-',
+  ]);
+
+  const csv = [header, ...rows].map((r) => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = officeTodayStr();
+  a.href = url;
+  a.download = `task-report-${scope}-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 function renderTaskReport(profile, canManage) {
   const scope = document.getElementById('rep-task-scope')?.value || 'all';

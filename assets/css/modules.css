@@ -171,6 +171,7 @@ table.tm-table tr:hover td { background: rgba(110, 120, 255, 0.04); }
   z-index: 30;
   min-width: 180px;
   background: var(--bg-card, #14162a);
+  color: #fff;
   border: 1px solid var(--border-color);
   border-radius: var(--r-md);
   padding: 0.6rem 0.8rem;

@@ -1,0 +1,261 @@
+/* ===================== Glass surfaces ===================== */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: var(--r-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
+}
+
+.glass-card--hover:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-glow);
+}
+
+/* ===================== Buttons ===================== */
+.btn-gradient {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #fff;
+  background: var(--gradient-brand);
+  border: none;
+  border-radius: var(--r-md);
+  padding: 0.85rem 1.5rem;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast);
+  box-shadow: 0 10px 24px rgba(110, 120, 255, 0.32);
+}
+
+.btn-gradient:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(110, 120, 255, 0.42);
+  color: #fff;
+}
+
+.btn-gradient:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-gradient:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-gradient .spinner-border {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-width: 2px;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: var(--r-md);
+  padding: 0.7rem 1.2rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+
+.btn-ghost:hover {
+  border-color: var(--indigo);
+  background: rgba(110, 120, 255, 0.06);
+  color: var(--text-primary);
+}
+
+/* ===================== Inputs ===================== */
+.field {
+  margin-bottom: 1.1rem;
+}
+
+.field label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.4rem;
+}
+
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-wrap i.icon-left {
+  position: absolute;
+  left: 14px;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  pointer-events: none;
+}
+
+.input-wrap .toggle-visibility {
+  position: absolute;
+  right: 14px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.form-control-glass {
+  width: 100%;
+  padding: 0.85rem 1rem 0.85rem 2.6rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+
+.form-control-glass:focus {
+  outline: none;
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 4px rgba(110, 120, 255, 0.14);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 0.8rem;
+  margin-top: 0.35rem;
+  display: none;
+}
+
+.field.has-error .form-control-glass {
+  border-color: var(--danger);
+}
+
+.field.has-error .field-error {
+  display: block;
+}
+
+/* ===================== Chips / role selector ===================== */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-color);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+  background: transparent;
+}
+
+.chip.active {
+  border-color: var(--indigo);
+  color: var(--indigo);
+  background: rgba(110, 120, 255, 0.1);
+}
+
+/* ===================== Avatar ===================== */
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #fff;
+  background: var(--gradient-brand-diagonal);
+  flex-shrink: 0;
+}
+
+/* ===================== Badges ===================== */
+.badge-soft {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--r-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-soft.success { background: rgba(47, 216, 137, 0.14); color: var(--success); }
+.badge-soft.warning { background: rgba(255, 182, 72, 0.16); color: #c98317; }
+.badge-soft.danger  { background: rgba(255, 92, 114, 0.14); color: var(--danger); }
+.badge-soft.info    { background: rgba(79, 176, 255, 0.14); color: var(--info); }
+
+/* ===================== Toast ===================== */
+.tm-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2000;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  transform: translateX(120%);
+  transition: transform var(--dur-med) var(--ease-out);
+}
+
+.tm-toast.show { transform: translateX(0); }
+.tm-toast.error { border-left: 3px solid var(--danger); }
+.tm-toast.success { border-left: 3px solid var(--success); }
+
+/* ===================== Theme toggle switch ===================== */
+.theme-toggle {
+  width: 42px;
+  height: 24px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.theme-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--gradient-brand);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+[data-theme='dark'] .theme-toggle::after {
+  transform: translateX(18px);
+}

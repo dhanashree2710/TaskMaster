@@ -1,0 +1,69 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  transition: background var(--dur-med) var(--ease-out), color var(--dur-med) var(--ease-out);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+h1 { font-size: 2.4rem; font-weight: 700; line-height: 1.1; }
+h2 { font-size: 1.75rem; font-weight: 700; line-height: 1.15; }
+h3 { font-size: 1.25rem; font-weight: 700; line-height: 1.2; }
+
+p { margin: 0; color: var(--text-secondary); line-height: 1.6; }
+
+.mono {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+a { color: var(--indigo); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+::selection {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+/* Visible focus ring for accessibility */
+:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.text-secondary { color: var(--text-secondary) !important; }
+
+.gradient-text {
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

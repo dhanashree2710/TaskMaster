@@ -5,10 +5,15 @@ let ATT_CACHE = [];
 let ATT_TODAY = null;
 let ATT_TAB = 'all';
 
-// Office hours: 10:30 AM - 5:30 PM (Asia/Kolkata). Checking in any time
-// after 10:30 AM counts as Late.
+// Office hours: 10:30 AM - 5:30 PM (Asia/Kolkata)
+// Check-in from 10:30 AM to 11:00 AM = On Time
+// Check-in after 11:00 AM = Late
+
 const OFFICE_START_HOUR = 10;
 const OFFICE_START_MINUTE = 30;
+
+const LATE_AFTER_HOUR = 11;
+const LATE_AFTER_MINUTE = 0;
 
 function renderAttendanceSection() {
   return `
@@ -189,8 +194,12 @@ function renderAttendanceTable() {
 
 async function checkIn(profile) {
   const now = new Date();
-  const { hour, minute } = officeNowClock();
-  const isLate = hour > OFFICE_START_HOUR || (hour === OFFICE_START_HOUR && minute > OFFICE_START_MINUTE);
+
+  const lateTime = new Date(now);
+  lateTime.setHours(LATE_AFTER_HOUR, LATE_AFTER_MINUTE, 0, 0);
+
+  const isLate = now > lateTime;
+
   const { error } = await sb.from('attendance').insert({
     user_id: profile.user_id,
     attendance_date: officeTodayStr(),
@@ -198,8 +207,16 @@ async function checkIn(profile) {
     status: isLate ? 'Late' : 'Present',
     device: navigator.userAgent.slice(0, 60),
   });
+
   if (error) return showToast(error.message, 'error');
-  showToast(isLate ? 'Checked in. You are marked Late (office starts 10:30 AM).' : 'Checked in. Have a great day!', isLate ? 'error' : 'success');
+
+  showToast(
+    isLate
+      ? 'Checked in. You are marked Late (after 11:00 AM).'
+      : 'Checked in. Have a great day!',
+    isLate ? 'error' : 'success'
+  );
+
   const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
   loadAttendance(profile, roleMeta.canManageTeam);
 }

@@ -206,7 +206,7 @@ function renderTaskReportPeople(byPerson) {
                   <td><span class="badge-soft ${priorityBadge(t.priority)}">${escapeHtml(t.priority || '-')}</span></td>
                   <td><span class="badge-soft ${statusBadgeClass(t.status)}">${escapeHtml(t.status)}</span></td>
                   <td>${fmtDate(t.due_date)}</td>
-                  <td><div class="mini-progress"><span style="width:${t.progress || 0}%;"></span></div></td>
+                  <td><div class="progress-inline"><div class="mini-progress"><span style="width:${t.progress || 0}%;"></span></div><span class="progress-pct">${t.progress || 0}%</span></div></td>
                 </tr>`
                 )
                 .join('')}
@@ -289,16 +289,43 @@ function renderReportList() {
   );
 }
 
-function openReportModal(profile) {
+async function openReportModal(profile) {
   const today = new Date().toISOString().slice(0, 10);
+
+  // Hours worked: computed from today's check-in to right now, not typed in.
+  let checkInIso = null;
+  try {
+    const { data: att } = await sb
+      .from('attendance')
+      .select('check_in')
+      .eq('user_id', profile.user_id)
+      .eq('attendance_date', officeTodayStr())
+      .maybeSingle();
+    checkInIso = att?.check_in || null;
+  } catch (e) { /* no attendance row yet today */ }
+
+  const computeHours = () => (checkInIso ? Math.max(0, (Date.now() - new Date(checkInIso).getTime()) / 3600000) : 0);
+  const hoursNow = computeHours();
+
+  // Tasks assigned to the logged-in person, shown as a tickable checklist.
+  const myTasks = (typeof TASKS_CACHE !== 'undefined' ? TASKS_CACHE : []).filter((t) => t.assigned_to === profile.user_id);
+
   const html = `
     <div class="tm-modal-backdrop show" id="modal-report-new">
       <div class="tm-modal wide">
         <div class="tm-modal-head"><h3>Submit daily report</h3><button class="tm-modal-close" data-close-modal="modal-report-new">&times;</button></div>
         <div class="field-row">
           <div class="field"><label>Date</label><input type="date" class="form-control-glass" style="padding-left:1rem;" id="rp-date" value="${today}" /></div>
-          <div class="field"><label>Hours worked</label><input type="number" min="0" max="24" step="0.5" class="form-control-glass" style="padding-left:1rem;" id="rp-hours" value="8" /></div>
+          <div class="field"><label>Hours worked <span class="text-secondary" style="font-weight:400;">(auto, from today's check-in)</span></label>
+            <input type="text" class="form-control-glass" style="padding-left:1rem;" id="rp-hours-display" value="${hoursNow.toFixed(2)}h${checkInIso ? '' : ' (not checked in today)'}" disabled />
+          </div>
         </div>
+
+        <div class="field">
+          <label>Your tasks <span class="text-secondary" style="font-weight:400;">(tick what's done — this updates the task too)</span></label>
+          <div id="rp-task-checklist">${myTasks.length ? myTasks.map(reportTaskChecklistItemHtml).join('') : '<p class="text-secondary" style="font-size:0.82rem;">No tasks assigned to you yet.</p>'}</div>
+        </div>
+
         <div class="field"><label>Completed work</label><textarea class="form-control-glass" id="rp-completed"></textarea></div>
         <div class="field"><label>Pending work</label><textarea class="form-control-glass" id="rp-pending"></textarea></div>
         <div class="field-row">
@@ -313,11 +340,15 @@ function openReportModal(profile) {
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
 
+  document.querySelectorAll('[data-report-task-toggle]').forEach((cb) =>
+    cb.addEventListener('change', () => toggleReportTaskStatus(cb.dataset.reportTaskToggle, cb.checked, cb))
+  );
+
   document.getElementById('rp-submit').addEventListener('click', async () => {
     const payload = {
       user_id: profile.user_id,
       report_date: document.getElementById('rp-date').value,
-      hours: Number(document.getElementById('rp-hours').value) || 0,
+      hours: Number(computeHours().toFixed(2)),
       completed_work: document.getElementById('rp-completed').value.trim(),
       pending_work: document.getElementById('rp-pending').value.trim(),
       challenge: document.getElementById('rp-challenge').value.trim(),
@@ -330,5 +361,35 @@ function openReportModal(profile) {
     closeModal('modal-report-new');
     const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
     loadReports(profile, roleMeta.canManageTeam);
+    const canManageTasks = roleMeta.canManageTeam;
+    if (typeof loadTasks === 'function') loadTasks(profile, canManageTasks);
   });
+}
+
+function reportTaskChecklistItemHtml(t) {
+  const checked = t.status === 'Completed';
+  return `<label class="checklist-item" data-report-task-row="${t.task_id}">
+    <input type="checkbox" data-report-task-toggle="${t.task_id}" ${checked ? 'checked' : ''}/>
+    <span style="${checked ? 'text-decoration:line-through;color:var(--text-secondary);' : ''}">${escapeHtml(t.title)}</span>
+  </label>`;
+}
+
+// Ticking marks the task Completed, unticking sends it back to Pending —
+// keeps the Tasks module and this report checklist in sync immediately.
+async function toggleReportTaskStatus(taskId, checked, checkboxEl) {
+  const patch = checked
+    ? { status: 'Completed', progress: 100, completed_date: new Date().toISOString().slice(0, 10) }
+    : { status: 'Pending', progress: 0, completed_date: null };
+  const { error } = await sb.from('tasks').update(patch).eq('task_id', taskId);
+  if (error) {
+    showToast(error.message, 'error');
+    checkboxEl.checked = !checked;
+    return;
+  }
+  if (typeof TASKS_CACHE !== 'undefined') {
+    const idx = TASKS_CACHE.findIndex((t) => t.task_id === taskId);
+    if (idx > -1) TASKS_CACHE[idx] = { ...TASKS_CACHE[idx], ...patch };
+  }
+  const label = checkboxEl.closest('[data-report-task-row]')?.querySelector('span');
+  if (label) label.style.cssText = checked ? 'text-decoration:line-through;color:var(--text-secondary);' : '';
 }

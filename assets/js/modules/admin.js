@@ -2,6 +2,7 @@
 // Admin Panel module (Super Admin / Admin only)
 // ===========================================
 let ADMIN_USERS = [];
+let ADMIN_USER_PHOTOS = {};
 let HOLIDAYS_CACHE = [];
 
 function renderAdminSection() {
@@ -90,6 +91,7 @@ async function initAdmin(profile) {
 
 async function loadAdminUsers() {
   ADMIN_USERS = await fetchAllUsers();
+  ADMIN_USER_PHOTOS = await fetchUserPhotoMap(ADMIN_USERS.map((u) => u.user_id));
   renderAdminUsers();
 }
 
@@ -107,7 +109,7 @@ function renderAdminUsers() {
     .map(
       (u) => `
     <tr>
-      <td><div class="person-cell"><div class="avatar">${getInitials(u.user_name)}</div><div class="p-name">${escapeHtml(u.user_name)}</div></div></td>
+      <td><div class="person-cell">${avatarHtml(u.user_name, ADMIN_USER_PHOTOS[u.user_id])}<div class="p-name">${escapeHtml(u.user_name)}</div></div></td>
       <td>${escapeHtml(u.user_email)}</td>
       <td>
         <select class="form-select-tm" data-role-select="${u.user_id}" style="min-width:120px;">
@@ -118,7 +120,9 @@ function renderAdminUsers() {
       <td>${u.last_login ? fmtTimeAgo(u.last_login) : 'Never'}</td>
       <td>
         <div class="row-actions">
+          <button class="icon-btn-sm" data-edit-user="${u.user_id}" title="Edit name/email"><i class="fa-solid fa-pen"></i></button>
           <button class="icon-btn-sm" data-toggle-status="${u.user_id}" title="Toggle active/inactive"><i class="fa-solid fa-power-off"></i></button>
+          <button class="icon-btn-sm danger" data-remove-user="${u.user_id}" title="Remove user"><i class="fa-solid fa-trash"></i></button>
         </div>
       </td>
     </tr>`
@@ -145,6 +149,72 @@ function renderAdminUsers() {
       loadAdminUsers();
     })
   );
+  body.querySelectorAll('[data-edit-user]').forEach((btn) =>
+    btn.addEventListener('click', () => openUserEditModal(btn.dataset.editUser))
+  );
+  body.querySelectorAll('[data-remove-user]').forEach((btn) =>
+    btn.addEventListener('click', () => removeUser(btn.dataset.removeUser))
+  );
+}
+
+// ---------- Edit a user's name/email (Super Admin / Admin / Manager) ----------
+function openUserEditModal(userId) {
+  const u = ADMIN_USERS.find((x) => x.user_id === userId);
+  if (!u) return;
+  const html = `
+    <div class="tm-modal-backdrop show" id="modal-user-edit">
+      <div class="tm-modal">
+        <div class="tm-modal-head"><h3>Edit user</h3><button class="tm-modal-close" data-close-modal="modal-user-edit">&times;</button></div>
+        <div class="field"><label>Name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ue-name" value="${escapeHtml(u.user_name)}" /></div>
+        <div class="field"><label>Email</label><input type="email" class="form-control-glass" style="padding-left:1rem;" id="ue-email" value="${escapeHtml(u.user_email)}" /></div>
+        <div class="tm-modal-actions">
+          <button class="btn-sm-ghost" data-close-modal="modal-user-edit">Cancel</button>
+          <button class="btn-sm-gradient" id="ue-save">Save changes</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+
+  document.getElementById('ue-save').addEventListener('click', async () => {
+    const name = document.getElementById('ue-name').value.trim();
+    const email = document.getElementById('ue-email').value.trim();
+    if (!name || !email) return showToast('Add a name and email.', 'error');
+    const { error } = await sb.from('users').update({ user_name: name, user_email: email }).eq('user_id', userId);
+    if (error) return showToast(error.message, 'error');
+    const profile = getStoredUser();
+    await logActivity(profile.user_id, `Edited user ${name}`);
+    if (profile.user_id === userId) {
+      localStorage.setItem('user', JSON.stringify({ ...profile, user_name: name, user_email: email }));
+    }
+    showToast('User updated.', 'success');
+    closeModal('modal-user-edit');
+    loadAdminUsers();
+  });
+}
+
+// ---------- Remove a user (Super Admin / Admin / Manager) ----------
+async function removeUser(userId) {
+  const u = ADMIN_USERS.find((x) => x.user_id === userId);
+  if (!u) return;
+  const profile = getStoredUser();
+  if (userId === profile.user_id) return showToast("You can't remove your own account.", 'error');
+  if (u.role === 'Super Admin' && profile.role !== 'Super Admin') {
+    return showToast('Only a Super Admin can remove a Super Admin.', 'error');
+  }
+  if (!confirm(`Remove ${u.user_name}? This cannot be undone.`)) return;
+
+  const { error } = await sb.from('users').delete().eq('user_id', userId);
+  if (error) {
+    return showToast(
+      error.message.includes('foreign key')
+        ? `${u.user_name} still has linked records (tasks, attendance, etc.) and can't be removed. Set them Inactive instead.`
+        : error.message,
+      'error'
+    );
+  }
+  await logActivity(profile.user_id, `Removed user ${u.user_name}`);
+  showToast(`${u.user_name} was removed.`, 'success');
+  loadAdminUsers();
 }
 
 async function loadDepartmentsAdmin() {

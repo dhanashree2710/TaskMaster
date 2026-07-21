@@ -163,7 +163,7 @@ function taskCardHtml(t) {
     <div class="task-card" data-id="${t.task_id}">
       <div class="t-title">${escapeHtml(t.title)}</div>
       <span class="badge-soft ${priorityBadge(t.priority)}">${escapeHtml(t.priority || 'Normal')}</span>
-      <div class="mini-progress mt-2"><span style="width:${t.progress || 0}%;"></span></div>
+      <div class="progress-inline mt-2"><div class="mini-progress"><span style="width:${t.progress || 0}%;"></span></div><span class="progress-pct">${t.progress || 0}%</span></div>
       <div class="t-meta">
         <span>${escapeHtml(t.assignee?.user_name || 'Unassigned')}</span>
         <span>${fmtDate(t.due_date)}</span>
@@ -186,7 +186,7 @@ function renderTaskList(tasks) {
       <td><span class="badge-soft ${priorityBadge(t.priority)}">${escapeHtml(t.priority || '-')}</span></td>
       <td><span class="badge-soft ${statusBadgeClass(t.status)}">${escapeHtml(t.status)}</span></td>
       <td>${fmtDate(t.due_date)}</td>
-      <td><div class="mini-progress"><span style="width:${t.progress || 0}%;"></span></div></td>
+      <td><div class="progress-inline"><div class="mini-progress"><span style="width:${t.progress || 0}%;"></span></div><span class="progress-pct">${t.progress || 0}%</span></div></td>
       <td><button class="icon-btn-sm" data-view-task="${t.task_id}"><i class="fa-solid fa-eye"></i></button></td>
     </tr>`
     )
@@ -215,8 +215,8 @@ async function openTaskModal(profile) {
         <div class="field"><label>Title</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="nt-title" placeholder="Ship the onboarding flow" /></div>
         <div class="field"><label>Description</label><textarea class="form-control-glass" id="nt-desc" placeholder="What needs to happen?"></textarea></div>
         <div class="field-row">
-          <div class="field"><label>Assign to</label>
-            <select class="form-control-glass" id="nt-assignee">
+          <div class="field"><label>Assign to${canManage ? ' <span class="text-secondary" style="font-weight:400;">(select multiple to assign the same task to everyone picked)</span>' : ''}</label>
+            <select class="form-control-glass" id="nt-assignee" ${canManage ? 'multiple size="5"' : ''}>
               ${users.map((u) => `<option value="${u.user_id}" ${u.user_id === profile.user_id ? 'selected' : ''}>${escapeHtml(u.user_name)}</option>`).join('')}
             </select>
           </div>
@@ -232,6 +232,13 @@ async function openTaskModal(profile) {
           </div>
           <div class="field"><label>Due date</label><input type="date" class="form-control-glass" style="padding-left:1rem;" id="nt-due" /></div>
         </div>
+        <div class="field">
+          <label>Attach files <span class="text-secondary" style="font-weight:400;">(optional)</span></label>
+          <input type="file" id="nt-files" multiple hidden />
+          <button type="button" class="btn-sm-ghost" id="nt-files-btn"><i class="fa-solid fa-paperclip"></i> Add files or photos</button>
+          <div id="nt-files-list" class="mt-2"></div>
+          <span class="photo-field-status" id="nt-files-status"></span>
+        </div>
         <div class="tm-modal-actions">
           <button class="btn-sm-ghost" data-close-modal="modal-task-new">Cancel</button>
           <button class="btn-sm-gradient" id="nt-submit">Create task</button>
@@ -240,14 +247,39 @@ async function openTaskModal(profile) {
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
 
+  // ---------- Optional file attachments, uploaded once the task exists ----------
+  let pendingFiles = [];
+  const filesListEl = document.getElementById('nt-files-list');
+  const renderPendingFiles = () => {
+    filesListEl.innerHTML = pendingFiles
+      .map((f, i) => `<div class="d-flex align-items-center gap-2" style="font-size:0.82rem;margin-bottom:0.25rem;"><i class="fa-solid fa-file"></i> ${escapeHtml(f.name)} <button type="button" class="icon-btn-sm danger" data-remove-pending-file="${i}" style="width:22px;height:22px;"><i class="fa-solid fa-xmark"></i></button></div>`)
+      .join('');
+    filesListEl.querySelectorAll('[data-remove-pending-file]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        pendingFiles.splice(Number(btn.dataset.removePendingFile), 1);
+        renderPendingFiles();
+      })
+    );
+  };
+  document.getElementById('nt-files-btn').addEventListener('click', () => document.getElementById('nt-files').click());
+  document.getElementById('nt-files').addEventListener('change', (e) => {
+    pendingFiles = pendingFiles.concat(Array.from(e.target.files || []));
+    renderPendingFiles();
+    e.target.value = '';
+  });
+
   document.getElementById('nt-submit').addEventListener('click', async () => {
     const title = document.getElementById('nt-title').value.trim();
     if (!title) return showToast('Give the task a title.', 'error');
-    const assigned_to = document.getElementById('nt-assignee').value;
-    const payload = {
+    const assigneeSelect = document.getElementById('nt-assignee');
+    const assigneeIds = canManage
+      ? Array.from(assigneeSelect.selectedOptions).map((o) => o.value)
+      : [assigneeSelect.value];
+    if (!assigneeIds.length) return showToast('Pick at least one person to assign this to.', 'error');
+
+    const basePayload = {
       title,
       description: document.getElementById('nt-desc').value.trim(),
-      assigned_to,
       assigned_by: profile.user_id,
       department_id: document.getElementById('nt-dept').value || null,
       priority: document.getElementById('nt-priority').value,
@@ -255,12 +287,36 @@ async function openTaskModal(profile) {
       status: 'Pending',
       progress: 0,
     };
-    const { error } = await sb.from('tasks').insert(payload);
+
+    const { data: inserted, error } = await sb
+      .from('tasks')
+      .insert(assigneeIds.map((assigned_to) => ({ ...basePayload, assigned_to })))
+      .select('task_id, assigned_to');
     if (error) return showToast(error.message, 'error');
 
-    await notifyUsers([assigned_to], 'New task assigned', `${profile.user_name} assigned you "${title}"`, 'page-tasks');
-    await logActivity(profile.user_id, `Created task "${title}"`);
-    showToast('Task created.', 'success');
+    // Optional attachments get uploaded once and linked to every created task.
+    if (pendingFiles.length) {
+      document.getElementById('nt-files-status').textContent = 'Uploading attachments...';
+      try {
+        const uploaded = [];
+        for (const file of pendingFiles) {
+          const url = await uploadPhotoToBucket(STORAGE_BUCKETS.taskFiles, file);
+          uploaded.push({ file_url: url, file_name: file.name });
+        }
+        const fileRows = [];
+        (inserted || []).forEach((row) => {
+          uploaded.forEach((u) => fileRows.push({ task_id: row.task_id, file_url: u.file_url, file_name: u.file_name, uploaded_by: profile.user_id }));
+        });
+        if (fileRows.length) await sb.from('task_files').insert(fileRows);
+      } catch (err) {
+        console.error(err);
+        showToast('Task created, but attaching files failed.', 'error');
+      }
+    }
+
+    await notifyUsers(assigneeIds, 'New task assigned', `${profile.user_name} assigned you "${title}"`, 'page-tasks');
+    await logActivity(profile.user_id, `Created task "${title}"${assigneeIds.length > 1 ? ` for ${assigneeIds.length} people` : ''}`);
+    showToast(assigneeIds.length > 1 ? `Task created for ${assigneeIds.length} people.` : 'Task created.', 'success');
     closeModal('modal-task-new');
     loadTasks(profile, canManage);
   });
@@ -283,19 +339,53 @@ async function openTaskDetail(taskId) {
   }
 
   const { data: checklist } = await sb.from('task_checklists').select('*').eq('task_id', taskId).order('created_at');
+  const { data: files } = await sb.from('task_files').select('*').eq('task_id', taskId).order('created_at');
+  const assignableUsers = canManage ? await fetchActiveUsers().catch(() => []) : [];
+  const departments = canManage ? await fetchDepartments().catch(() => []) : [];
 
   const isOwner = t.assigned_to === profile.user_id;
   const html = `
     <div class="tm-modal-backdrop show" id="modal-task-detail">
       <div class="tm-modal wide">
-        <div class="tm-modal-head"><h3>${escapeHtml(t.title)}</h3><button class="tm-modal-close" data-close-modal="modal-task-detail">&times;</button></div>
-        <p class="mb-3">${escapeHtml(t.description || 'No description provided.')}</p>
+        <div class="tm-modal-head">
+          ${canManage
+            ? `<input type="text" class="form-control-glass" style="padding-left:0.8rem;font-weight:600;" id="td-title" value="${escapeHtml(t.title)}" />`
+            : `<h3>${escapeHtml(t.title)}</h3>`}
+          <button class="tm-modal-close" data-close-modal="modal-task-detail">&times;</button>
+        </div>
+
+        ${canManage
+          ? `<div class="field"><label>Description</label><textarea class="form-control-glass" id="td-desc">${escapeHtml(t.description || '')}</textarea></div>`
+          : `<p class="mb-3">${escapeHtml(t.description || 'No description provided.')}</p>`}
+
+        ${canManage ? `
+        <div class="field-row mb-2">
+          <div class="field"><label>Assignee</label>
+            <select class="form-control-glass" id="td-assignee">
+              ${assignableUsers.map((u) => `<option value="${u.user_id}" ${u.user_id === t.assigned_to ? 'selected' : ''}>${escapeHtml(u.user_name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Department</label>
+            <select class="form-control-glass" id="td-dept">
+              <option value="">None</option>
+              ${departments.map((d) => `<option value="${d.department_id}" ${d.department_id === t.department_id ? 'selected' : ''}>${escapeHtml(d.department_name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field-row mb-2">
+          <div class="field"><label>Priority</label>
+            <select class="form-control-glass" id="td-priority">
+              ${['Low', 'Medium', 'High', 'Urgent'].map((p) => `<option ${t.priority === p ? 'selected' : ''}>${p}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Due date</label><input type="date" class="form-control-glass" style="padding-left:1rem;" id="td-due" value="${t.due_date || ''}" /></div>
+        </div>` : `
         <div class="detail-grid mb-3">
           <div><div class="dl-label">Assignee</div><div class="dl-value">${escapeHtml(t.assignee?.user_name || '-')}</div></div>
           <div><div class="dl-label">Assigned by</div><div class="dl-value">${escapeHtml(t.assigner?.user_name || '-')}</div></div>
           <div><div class="dl-label">Priority</div><div class="dl-value">${escapeHtml(t.priority || '-')}</div></div>
           <div><div class="dl-label">Due date</div><div class="dl-value">${fmtDate(t.due_date)}</div></div>
-        </div>
+        </div>`}
 
         <div class="field-row">
           <div class="field"><label>Status</label>
@@ -303,7 +393,7 @@ async function openTaskDetail(taskId) {
               ${['Pending', 'In Progress', 'Completed'].map((s) => `<option ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
           </div>
-          <div class="field"><label>Progress (${t.progress || 0}%)</label>
+          <div class="field"><label>Progress (<span id="td-progress-val">${t.progress || 0}</span>%)</label>
             <input type="range" min="0" max="100" id="td-progress" value="${t.progress || 0}" ${!canManage && !isOwner ? 'disabled' : ''} />
           </div>
         </div>
@@ -315,6 +405,15 @@ async function openTaskDetail(taskId) {
             <input type="text" class="form-control-glass" style="padding-left:1rem;" id="td-checklist-new" placeholder="Add a checklist item" />
             <button class="btn-sm-ghost" id="td-checklist-add">Add</button>
           </div>
+        </div>
+
+        <div class="field">
+          <label>Files</label>
+          <div id="td-files-list">${(files || []).map(taskFileHtml).join('') || '<p class="text-secondary" style="font-size:0.82rem;">No files attached yet.</p>'}</div>
+          ${(canManage || isOwner) ? `
+          <input type="file" id="td-file-input" multiple hidden />
+          <button type="button" class="btn-sm-ghost mt-2" id="td-file-add"><i class="fa-solid fa-paperclip"></i> Add files or photos</button>
+          <span class="photo-field-status" id="td-file-status"></span>` : ''}
         </div>
 
         ${isOwner ? `
@@ -345,6 +444,11 @@ async function openTaskDetail(taskId) {
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
 
+  // Live percentage while dragging the slider, not just after save.
+  document.getElementById('td-progress').addEventListener('input', (e) => {
+    document.getElementById('td-progress-val').textContent = e.target.value;
+  });
+
   document.getElementById('td-checklist-add').addEventListener('click', async () => {
     const title = document.getElementById('td-checklist-new').value.trim();
     if (!title) return;
@@ -356,6 +460,27 @@ async function openTaskDetail(taskId) {
       await sb.from('task_checklists').update({ status: cb.checked }).eq('id', cb.dataset.checklistToggle);
     })
   );
+
+  document.getElementById('td-file-add')?.addEventListener('click', () => document.getElementById('td-file-input').click());
+  document.getElementById('td-file-input')?.addEventListener('change', async (e) => {
+    const newFiles = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!newFiles.length) return;
+    const status = document.getElementById('td-file-status');
+    status.textContent = 'Uploading...';
+    try {
+      for (const file of newFiles) {
+        const url = await uploadPhotoToBucket(STORAGE_BUCKETS.taskFiles, file);
+        await sb.from('task_files').insert({ task_id: taskId, file_url: url, file_name: file.name, uploaded_by: profile.user_id });
+      }
+      status.textContent = '';
+      openTaskDetail(taskId);
+    } catch (err) {
+      console.error(err);
+      status.textContent = '';
+      showToast(err.message || 'File upload failed.', 'error');
+    }
+  });
 
   if (isOwner) {
     document.getElementById('td-ext-submit')?.addEventListener('click', async () => {
@@ -387,7 +512,10 @@ async function openTaskDetail(taskId) {
 
   document.getElementById('td-delete')?.addEventListener('click', async () => {
     if (!confirm('Delete this task?')) return;
-    await sb.from('tasks').delete().eq('task_id', taskId);
+    const { error } = await sb.from('tasks').delete().eq('task_id', taskId);
+    if (error) return showToast(error.message, 'error');
+    await logActivity(profile.user_id, `Deleted task "${t.title}"`);
+    showToast('Task deleted.', 'success');
     closeModal('modal-task-detail');
     loadTasks(profile, canManage);
   });
@@ -397,15 +525,44 @@ async function openTaskDetail(taskId) {
     const progress = Number(document.getElementById('td-progress').value);
     const patch = { status, progress };
     if (status === 'Completed') patch.completed_date = new Date().toISOString().slice(0, 10);
+
+    let reassigned = false;
+    if (canManage) {
+      const newTitle = document.getElementById('td-title').value.trim();
+      if (!newTitle) return showToast('Give the task a title.', 'error');
+      patch.title = newTitle;
+      patch.description = document.getElementById('td-desc').value.trim();
+      const newAssignee = document.getElementById('td-assignee').value;
+      reassigned = newAssignee !== t.assigned_to;
+      patch.assigned_to = newAssignee;
+      patch.department_id = document.getElementById('td-dept').value || null;
+      patch.priority = document.getElementById('td-priority').value;
+      patch.due_date = document.getElementById('td-due').value || null;
+    }
+
     const { error } = await sb.from('tasks').update(patch).eq('task_id', taskId);
     if (error) return showToast(error.message, 'error');
+
     if (status === 'Completed') {
       await notifyUsers([t.assigned_by], 'Task completed', `${profile.user_name} completed "${t.title}"`, 'page-tasks');
     }
+    if (reassigned) {
+      await notifyUsers([patch.assigned_to], 'Task assigned to you', `${profile.user_name} assigned you "${patch.title}"`, 'page-tasks');
+    }
+    await logActivity(profile.user_id, `Updated task "${patch.title || t.title}"`);
     showToast('Task updated.', 'success');
     closeModal('modal-task-detail');
     loadTasks(profile, canManage);
   });
+}
+
+function taskFileHtml(f) {
+  const isImage = /\.(png|jpe?g|gif|webp)$/i.test(f.file_name || f.file_url || '');
+  return `
+    <a class="task-file-row" href="${escapeHtml(f.file_url)}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;margin-bottom:0.35rem;color:var(--text-primary);text-decoration:none;">
+      <i class="fa-solid ${isImage ? 'fa-image' : 'fa-file'}"></i>
+      <span style="text-decoration:underline;">${escapeHtml(f.file_name || 'Attachment')}</span>
+    </a>`;
 }
 
 function checklistItemHtml(item) {

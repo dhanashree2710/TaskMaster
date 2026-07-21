@@ -168,6 +168,12 @@ async function loadWall(profile) {
     return;
   }
   WALL_CACHE = data || [];
+
+  const photoMap = await fetchUserPhotoMap(WALL_CACHE.map((p) => p.user_id));
+  WALL_CACHE.forEach((p) => {
+    if (p.author) p.author.photo_url = photoMap[p.user_id] || null;
+  });
+
   renderWallFeed();
 }
 
@@ -197,7 +203,7 @@ function renderWallFeed() {
       (p) => `
     <div class="glass-card wall-post" data-post="${p.post_id}">
       <div class="wall-post-head">
-        <div class="avatar">${getInitials(p.author?.user_name)}</div>
+        ${avatarHtml(p.author?.user_name, p.author?.photo_url)}
         <div><div class="p-name">${escapeHtml(p.author?.user_name || 'Someone')}</div><div class="p-time">${fmtTimeAgo(p.created_at)}</div></div>
         ${p.visible_roles && p.visible_roles.length ? `<span class="badge-soft info wall-visibility-badge" title="Only visible to: ${escapeHtml(p.visible_roles.join(', '))}"><i class="fa-solid fa-eye"></i> ${escapeHtml(p.visible_roles.length === 1 ? p.visible_roles[0] : p.visible_roles.length + ' roles')}</span>` : ''}
       </div>

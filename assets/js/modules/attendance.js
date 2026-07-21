@@ -24,6 +24,7 @@ function renderAttendanceSection() {
         <p>Check in, check out, and review presence across the team.</p>
       </div>
       <div class="d-flex gap-2">
+        <button class="btn-sm-ghost" id="att-download-btn" style="display:none;"><i class="fa-solid fa-download"></i> Download CSV</button>
         <button class="btn-sm-ghost" id="att-add-record-btn" style="display:none;"><i class="fa-solid fa-plus"></i> Add record</button>
         <button class="btn-gradient" id="att-checkin-btn"><i class="fa-solid fa-fingerprint"></i> Check in</button>
         <button class="btn-sm-ghost" id="att-checkout-btn" style="display:none;">Check out</button>
@@ -121,6 +122,10 @@ async function initAttendance(profile) {
     const addBtn = document.getElementById('att-add-record-btn');
     addBtn.style.display = '';
     addBtn.addEventListener('click', () => openAttendanceAddModal(users));
+
+    const downloadBtn = document.getElementById('att-download-btn');
+    downloadBtn.style.display = '';
+    downloadBtn.addEventListener('click', downloadAttendanceCsv);
   }
 
   await loadAttendance(profile, canManage);
@@ -144,17 +149,13 @@ async function loadAttendance(profile, canManage) {
   renderAttendanceTable();
 }
 
-function renderAttendanceTable() {
-  const profile = getStoredUser();
-  const roleMeta = ROLE_LABELS[profile?.role] || ROLE_LABELS.Employee;
-  const canManage = roleMeta.canManageTeam;
-
+function filteredAttendanceRows() {
   const from = document.getElementById('att-filter-from')?.value;
   const to = document.getElementById('att-filter-to')?.value;
   const status = document.getElementById('att-filter-status')?.value;
   const user = document.getElementById('att-filter-user')?.value;
 
-  const rows = ATT_CACHE.filter((a) => {
+  return ATT_CACHE.filter((a) => {
     if (from && a.attendance_date < from) return false;
     if (to && a.attendance_date > to) return false;
     if (status && a.status !== status) return false;
@@ -162,6 +163,14 @@ function renderAttendanceTable() {
     if (ATT_TAB !== 'all' && a.person?.role !== ATT_TAB) return false;
     return true;
   });
+}
+
+function renderAttendanceTable() {
+  const profile = getStoredUser();
+  const roleMeta = ROLE_LABELS[profile?.role] || ROLE_LABELS.Employee;
+  const canManage = roleMeta.canManageTeam;
+
+  const rows = filteredAttendanceRows();
 
   document.getElementById('att-filter-count').textContent = `${rows.length} record${rows.length === 1 ? '' : 's'}`;
   const body = document.getElementById('att-table-body');
@@ -190,6 +199,43 @@ function renderAttendanceTable() {
       btn.addEventListener('click', () => openAttendanceEditModal(btn.dataset.attEdit))
     );
   }
+}
+
+// ---------- Admin / Super Admin / Manager: download the attendance sheet as CSV ----------
+function csvEscapeAtt(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadAttendanceCsv() {
+  const rows = filteredAttendanceRows();
+  if (!rows.length) return showToast('No attendance records to export for these filters.', 'error');
+
+  const header = ['Date', 'Person', 'Role', 'Check-in', 'Check-out', 'Working hours', 'Status', 'Remarks'];
+  const lines = rows
+    .slice()
+    .sort((a, b) => (a.attendance_date < b.attendance_date ? -1 : a.attendance_date > b.attendance_date ? 1 : 0))
+    .map((a) => [
+      a.attendance_date || '-',
+      a.person?.user_name || '-',
+      a.person?.role || '-',
+      a.check_in ? fmtDateTime(a.check_in) : '-',
+      a.check_out ? fmtDateTime(a.check_out) : '-',
+      a.working_hours ? `${a.working_hours}h` : '-',
+      a.status || '-',
+      a.remarks || '',
+    ]);
+
+  const csv = [header, ...lines].map((r) => r.map(csvEscapeAtt).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `attendance-sheet-${officeTodayStr()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function checkIn(profile) {

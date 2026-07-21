@@ -87,6 +87,10 @@ table.tm-table tr:hover td { background: rgba(110, 120, 255, 0.04); }
 .mini-progress { width: 90px; height: 6px; border-radius: var(--r-pill); background: var(--border-color); overflow: hidden; }
 .mini-progress span { display: block; height: 100%; background: var(--gradient-brand); }
 
+.progress-inline { display: flex; align-items: center; gap: 0.5rem; }
+.progress-inline .mini-progress { flex: 1 1 auto; }
+.progress-inline .progress-pct { font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); min-width: 2.2em; text-align: right; flex-shrink: 0; }
+
 .person-cell { display: flex; align-items: center; gap: 0.6rem; }
 .person-cell .avatar { width: 32px; height: 32px; font-size: 0.7rem; }
 .person-cell .p-name { font-weight: 600; font-size: 0.85rem; }

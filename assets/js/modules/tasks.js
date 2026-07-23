@@ -101,6 +101,17 @@ async function loadTasks(profile, canManage) {
     return;
   }
   TASKS_CACHE = markOverdue(data || []);
+
+  try {
+    const ids = TASKS_CACHE.map((t) => t.task_id);
+    if (ids.length) {
+      const { data: files } = await sb.from('task_files').select('task_id').in('task_id', ids);
+      const counts = {};
+      (files || []).forEach((f) => { counts[f.task_id] = (counts[f.task_id] || 0) + 1; });
+      TASKS_CACHE = TASKS_CACHE.map((t) => ({ ...t, file_count: counts[t.task_id] || 0 }));
+    }
+  } catch (e) { /* attachment counts are a nice-to-have, not critical */ }
+
   renderTaskViews();
 }
 
@@ -163,6 +174,7 @@ function taskCardHtml(t) {
     <div class="task-card" data-id="${t.task_id}">
       <div class="t-title">${escapeHtml(t.title)}</div>
       <span class="badge-soft ${priorityBadge(t.priority)}">${escapeHtml(t.priority || 'Normal')}</span>
+      ${t.file_count ? `<span class="badge-soft info" style="margin-left:0.35rem;"><i class="fa-solid fa-paperclip"></i> ${t.file_count}</span>` : ''}
       <div class="progress-inline mt-2"><div class="mini-progress"><span style="width:${t.progress || 0}%;"></span></div><span class="progress-pct">${t.progress || 0}%</span></div>
       <div class="t-meta">
         <span>${escapeHtml(t.assignee?.user_name || 'Unassigned')}</span>
@@ -181,7 +193,7 @@ function renderTaskList(tasks) {
     .map(
       (t) => `
     <tr>
-      <td><strong>${escapeHtml(t.title)}</strong></td>
+      <td><strong>${escapeHtml(t.title)}</strong>${t.file_count ? ` <i class="fa-solid fa-paperclip" title="${t.file_count} file(s) attached" style="color:var(--text-secondary);font-size:0.8rem;"></i>` : ''}</td>
       <td>${escapeHtml(t.assignee?.user_name || 'Unassigned')}</td>
       <td><span class="badge-soft ${priorityBadge(t.priority)}">${escapeHtml(t.priority || '-')}</span></td>
       <td><span class="badge-soft ${statusBadgeClass(t.status)}">${escapeHtml(t.status)}</span></td>

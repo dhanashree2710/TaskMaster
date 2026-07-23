@@ -9,7 +9,7 @@ const MODULES = [
   { id: 'page-wall', label: 'Wall', icon: 'fa-solid fa-layer-group', requiresManage: false },
   { id: 'page-chat', label: 'Chat', icon: 'fa-regular fa-comment-dots', requiresManage: false },
   { id: 'page-meetings', label: 'Meetings', icon: 'fa-solid fa-video', requiresManage: false },
-  { id: 'page-admin', label: 'Admin Panel', icon: 'fa-solid fa-user-shield', requiresAdmin: true },
+  { id: 'page-admin', label: 'Admin Panel', icon: 'fa-solid fa-user-shield', requiresManage: true },
   { id: 'page-settings', label: 'Settings', icon: 'fa-solid fa-gear', requiresManage: false },
 ];
 
@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   currentProfile = auth.profile || { user_name: 'User', role: 'Employee' };
 
   renderUserChrome(currentProfile);
+  applyChromeAvatar(currentProfile);
   renderNav(currentProfile);
   renderModuleSections(currentProfile);
   renderPermissionChrome(currentProfile);
@@ -62,6 +63,43 @@ async function loadDashboardHome(profile) {
     const { count } = await leaveQuery;
     document.getElementById('stat-leaves').textContent = count ?? 0;
   } catch (e) {}
+
+  try {
+    let actQuery = sb
+      .from('activity_logs')
+      .select('log_id, activity, created_at, actor:users(user_name)')
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (!canManage) actQuery = actQuery.eq('user_id', profile.user_id);
+    const { data: activity, error } = await actQuery;
+    if (error) throw error;
+    renderRecentActivity(activity || []);
+  } catch (e) {
+    console.error('Could not load recent activity', e);
+  }
+}
+
+function renderRecentActivity(rows) {
+  const card = document.getElementById('recent-activity-card');
+  if (!card) return;
+  if (!rows.length) {
+    card.classList.add('activity-card');
+    card.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i><p>Activity will show up here once tasks, attendance, and posts start flowing through Supabase.</p>`;
+    return;
+  }
+  card.classList.remove('activity-card');
+  card.innerHTML = rows
+    .map(
+      (row) => `
+      <div class="d-flex align-items-start gap-2" style="padding:0.6rem 0;border-bottom:1px solid var(--border-color);">
+        <i class="fa-solid fa-clock-rotate-left mt-1" style="color:var(--text-secondary);"></i>
+        <div style="flex:1;">
+          <div style="font-size:0.88rem;"><strong>${escapeHtml(row.actor?.user_name || 'Someone')}</strong> ${escapeHtml(row.activity || '')}</div>
+          <div class="text-secondary" style="font-size:0.76rem;">${fmtTimeAgo(row.created_at)}</div>
+        </div>
+      </div>`
+    )
+    .join('');
 }
 
 async function initAllModules(profile) {
@@ -76,7 +114,7 @@ async function initAllModules(profile) {
     ['page-wall', initWall, true],
     ['page-chat', initChat, true],
     ['page-meetings', initMeetings, true],
-    ['page-admin', initAdmin, roleMeta.isAdmin],
+    ['page-admin', initAdmin, roleMeta.canManageTeam],
     ['page-settings', initSettings, true],
   ];
   for (const [sectionId, fn, allowed] of initializers) {
@@ -97,6 +135,17 @@ function renderUserChrome(profile) {
   document.getElementById('sidebar-role').textContent = profile.role || 'Employee';
   document.getElementById('greeting').textContent =
     `Welcome back, ${(profile.user_name || '').split(' ')[0] || 'there'}`;
+}
+
+async function applyChromeAvatar(profile) {
+  try {
+    const map = await fetchUserPhotoMap([profile.user_id]);
+    const photoUrl = map[profile.user_id] || null;
+    setAvatarEl(document.getElementById('sidebar-avatar'), profile.user_name, photoUrl);
+    setAvatarEl(document.getElementById('topbar-avatar'), profile.user_name, photoUrl);
+  } catch (e) {
+    // Non-critical — initials set by renderUserChrome already cover this.
+  }
 }
 
 function renderPermissionChrome(profile) {

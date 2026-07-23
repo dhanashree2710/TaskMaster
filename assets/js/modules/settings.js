@@ -77,9 +77,11 @@ async function initSettings(profile) {
   const personTable = isIntern ? 'interns' : 'employees';
   const bucket = isIntern ? STORAGE_BUCKETS.internPhotos : STORAGE_BUCKETS.employeePhotos;
   let currentPhotoUrl = '';
+  let hasPersonRecord = false;
   try {
     const { data } = await sb.from(personTable).select('photo_url').eq('user_id', profile.user_id).maybeSingle();
     currentPhotoUrl = data?.photo_url || '';
+    hasPersonRecord = !!data;
   } catch (e) { /* no linked record yet */ }
 
   document.getElementById('st-photo-slot').innerHTML = renderPhotoField('st-photo', { label: 'Photo', url: currentPhotoUrl });
@@ -92,13 +94,29 @@ async function initSettings(profile) {
     const { error } = await sb.from('users').update({ user_name: newName }).eq('user_id', profile.user_id);
     if (error) return showToast(error.message, 'error');
 
-    const { error: photoError } = await sb.from(personTable).update({ photo_url: newPhoto }).eq('user_id', profile.user_id);
+    let photoError = null;
+    if (hasPersonRecord) {
+      ({ error: photoError } = await sb.from(personTable).update({ photo_url: newPhoto }).eq('user_id', profile.user_id));
+    } else {
+      // No employees/interns row exists yet for this account (common for
+      // Admin/Super Admin/Manager logins) — an UPDATE would silently match
+      // zero rows and the photo would never actually save, so create the
+      // row instead.
+      ({ error: photoError } = await sb.from(personTable).insert({
+        user_id: profile.user_id,
+        first_name: newName,
+        email: profile.user_email,
+        photo_url: newPhoto,
+      }));
+      if (!photoError) hasPersonRecord = true;
+    }
     if (photoError) console.warn('Could not update photo on linked profile record', photoError);
 
     const updated = { ...profile, user_name: newName };
     localStorage.setItem('user', JSON.stringify(updated));
     showToast('Profile updated.', 'success');
     renderUserChrome(updated);
+    if (typeof applyChromeAvatar === 'function') applyChromeAvatar(updated);
   });
 
   document.getElementById('st-save-password').addEventListener('click', async () => {

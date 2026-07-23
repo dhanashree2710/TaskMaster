@@ -84,6 +84,36 @@ let REP_TASK_CHART = null;
 const TASK_STATUS_ORDER = ['Pending', 'In Progress', 'Completed', 'Overdue'];
 const TASK_STATUS_COLORS = { Pending: '#4fb0ff', 'In Progress': '#ffb648', Completed: '#2fd889', Overdue: '#ff5c72' };
 
+// ---------- Share a daily report as a WhatsApp message ----------
+// Builds a plain-text summary (WhatsApp *bold* markup) from a report's
+// fields, then opens wa.me with that text pre-filled so the user picks
+// who to send it to — no contact/number is baked in.
+function buildReportShareText({ name, date, hours, completed, pending, challenge, tomorrow }) {
+  const lines = [
+    `*Daily Report - ${name}*`,
+    `Date: ${typeof fmtDate === 'function' ? fmtDate(date) : date}`,
+    `Hours worked: ${hours || 0}h`,
+    '',
+    '*Completed:*',
+    completed && completed.trim() ? completed.trim() : '-',
+    '',
+    '*Pending:*',
+    pending && pending.trim() ? pending.trim() : '-',
+  ];
+  if (challenge && challenge.trim()) {
+    lines.push('', '*Challenges:*', challenge.trim());
+  }
+  if (tomorrow && tomorrow.trim()) {
+    lines.push('', "*Tomorrow's plan:*", tomorrow.trim());
+  }
+  return lines.join('\n');
+}
+
+function shareTextOnWhatsapp(text) {
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
+}
+
 function csvEscape(value) {
   const s = String(value ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -261,6 +291,7 @@ function renderReportList() {
     <div class="glass-card mb-3">
       <div class="d-flex justify-content-between align-items-start mb-2 flex-wrap gap-2">
         <div><strong>${escapeHtml(r.person?.user_name || 'Someone')}</strong> <span class="text-secondary" style="font-size:0.8rem;"> &middot; ${fmtDate(r.report_date)} &middot; ${r.hours || 0}h logged</span></div>
+        <button class="btn-sm-ghost" data-share-report="${r.report_id}"><i class="fa-brands fa-whatsapp"></i> Share</button>
       </div>
       <div class="detail-grid mb-2">
         <div><div class="dl-label">Completed</div><div class="dl-value" style="font-weight:400;">${escapeHtml(r.completed_work || '-')}</div></div>
@@ -277,6 +308,23 @@ function renderReportList() {
     )
     .join('');
 
+  list.querySelectorAll('[data-share-report]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const r = REP_CACHE.find((x) => String(x.report_id) === btn.dataset.shareReport);
+      if (!r) return;
+      const text = buildReportShareText({
+        name: r.person?.user_name || 'Someone',
+        date: r.report_date,
+        hours: r.hours,
+        completed: r.completed_work,
+        pending: r.pending_work,
+        challenge: r.challenge,
+        tomorrow: r.tomorrow_plan,
+      });
+      shareTextOnWhatsapp(text);
+    })
+  );
+
   list.querySelectorAll('[data-remark-save]').forEach((btn) =>
     btn.addEventListener('click', async () => {
       const id = btn.dataset.remarkSave;
@@ -292,23 +340,46 @@ function renderReportList() {
 async function openReportModal(profile) {
   const today = new Date().toISOString().slice(0, 10);
 
-  // Hours worked: computed from today's check-in to right now, not typed in.
+  // Hours worked: computed from today's check-in, not typed in. If the
+  // person has already checked out, that's the end time (a fixed value);
+  // otherwise it keeps counting up to right now.
   let checkInIso = null;
+  let checkOutIso = null;
   try {
     const { data: att } = await sb
       .from('attendance')
-      .select('check_in')
+      .select('check_in, check_out')
       .eq('user_id', profile.user_id)
       .eq('attendance_date', officeTodayStr())
       .maybeSingle();
     checkInIso = att?.check_in || null;
+    checkOutIso = att?.check_out || null;
   } catch (e) { /* no attendance row yet today */ }
 
-  const computeHours = () => (checkInIso ? Math.max(0, (Date.now() - new Date(checkInIso).getTime()) / 3600000) : 0);
+  const computeHours = () => {
+    if (!checkInIso) return 0;
+    const start = parseDbDate(checkInIso).getTime();
+    const end = checkOutIso ? parseDbDate(checkOutIso).getTime() : Date.now();
+    return Math.max(0, (end - start) / 3600000);
+  };
   const hoursNow = computeHours();
 
   // Tasks assigned to the logged-in person, shown as a tickable checklist.
   const myTasks = (typeof TASKS_CACHE !== 'undefined' ? TASKS_CACHE : []).filter((t) => t.assigned_to === profile.user_id);
+
+  // "Completed work": only tasks completed on the report's date (usually
+  // today) — not everything that happens to be Completed right now.
+  // "Pending work": all of your open tasks, regardless of date.
+  const buildCompletedText = (dateStr) =>
+    myTasks
+      .filter((t) => t.status === 'Completed' && t.completed_date === dateStr)
+      .map((t) => `- ${t.title}`)
+      .join('\n');
+  const buildPendingText = () =>
+    myTasks
+      .filter((t) => t.status !== 'Completed')
+      .map((t) => `- ${t.title}`)
+      .join('\n');
 
   const html = `
     <div class="tm-modal-backdrop show" id="modal-report-new">
@@ -316,33 +387,68 @@ async function openReportModal(profile) {
         <div class="tm-modal-head"><h3>Submit daily report</h3><button class="tm-modal-close" data-close-modal="modal-report-new">&times;</button></div>
         <div class="field-row">
           <div class="field"><label>Date</label><input type="date" class="form-control-glass" style="padding-left:1rem;" id="rp-date" value="${today}" /></div>
-          <div class="field"><label>Hours worked <span class="text-secondary" style="font-weight:400;">(auto, from today's check-in)</span></label>
+          <div class="field"><label>Hours worked <span class="text-secondary" style="font-weight:400;">(auto${checkOutIso ? ', from check-in to check-out' : ', from check-in to now'})</span></label>
             <input type="text" class="form-control-glass" style="padding-left:1rem;" id="rp-hours-display" value="${hoursNow.toFixed(2)}h${checkInIso ? '' : ' (not checked in today)'}" disabled />
           </div>
         </div>
 
         <div class="field">
-          <label>Your tasks <span class="text-secondary" style="font-weight:400;">(tick what's done — this updates the task too)</span></label>
-          <div id="rp-task-checklist">${myTasks.length ? myTasks.map(reportTaskChecklistItemHtml).join('') : '<p class="text-secondary" style="font-size:0.82rem;">No tasks assigned to you yet.</p>'}</div>
+          <label>Your tasks <span class="text-secondary" style="font-weight:400;">(tick what's done — it moves to Completed and updates the task too)</span></label>
+          <div class="field-row">
+            <div class="glass-card" style="padding:0.8rem;">
+              <strong style="font-size:0.82rem;color:var(--text-secondary);">PENDING</strong>
+              <div id="rp-task-pending" class="mt-2">${renderReportTaskBox(myTasks.filter((t) => t.status !== 'Completed'))}</div>
+            </div>
+            <div class="glass-card" style="padding:0.8rem;">
+              <strong style="font-size:0.82rem;color:var(--text-secondary);">COMPLETED</strong>
+              <div id="rp-task-completed" class="mt-2">${renderReportTaskBox(myTasks.filter((t) => t.status === 'Completed' && t.completed_date === today))}</div>
+            </div>
+          </div>
         </div>
 
-        <div class="field"><label>Completed work</label><textarea class="form-control-glass" id="rp-completed"></textarea></div>
-        <div class="field"><label>Pending work</label><textarea class="form-control-glass" id="rp-pending"></textarea></div>
+        <div class="field"><label>Completed work <span class="text-secondary" style="font-weight:400;">(auto-filled from tasks completed on this date — edit freely)</span></label><textarea class="form-control-glass" id="rp-completed">${buildCompletedText(today)}</textarea></div>
+        <div class="field"><label>Pending work <span class="text-secondary" style="font-weight:400;">(auto-filled from all your open tasks — edit freely)</span></label><textarea class="form-control-glass" id="rp-pending">${buildPendingText()}</textarea></div>
         <div class="field-row">
           <div class="field"><label>Challenges</label><textarea class="form-control-glass" id="rp-challenge"></textarea></div>
           <div class="field"><label>Tomorrow's plan</label><textarea class="form-control-glass" id="rp-tomorrow"></textarea></div>
         </div>
         <div class="tm-modal-actions">
           <button class="btn-sm-ghost" data-close-modal="modal-report-new">Cancel</button>
+          <button class="btn-sm-ghost" id="rp-share-btn"><i class="fa-brands fa-whatsapp"></i> Share on WhatsApp</button>
           <button class="btn-sm-gradient" id="rp-submit">Submit</button>
         </div>
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
 
-  document.querySelectorAll('[data-report-task-toggle]').forEach((cb) =>
-    cb.addEventListener('change', () => toggleReportTaskStatus(cb.dataset.reportTaskToggle, cb.checked, cb))
-  );
+  // Keep "Completed work" (date-specific) / "Pending work" (all open
+  // tasks) in sync with the checklist above them and with the Date field
+  // — but stop touching a box the moment the person types their own text
+  // into it.
+  let completedEdited = false;
+  let pendingEdited = false;
+  document.getElementById('rp-completed').addEventListener('input', () => { completedEdited = true; }, { once: true });
+  document.getElementById('rp-pending').addEventListener('input', () => { pendingEdited = true; }, { once: true });
+  const syncWorkTextareas = () => {
+    if (!completedEdited) document.getElementById('rp-completed').value = buildCompletedText(document.getElementById('rp-date').value);
+    if (!pendingEdited) document.getElementById('rp-pending').value = buildPendingText();
+  };
+  document.getElementById('rp-date').addEventListener('change', syncWorkTextareas);
+
+  wireReportTaskCheckboxes(syncWorkTextareas);
+
+  document.getElementById('rp-share-btn').addEventListener('click', () => {
+    const text = buildReportShareText({
+      name: profile.user_name || profile.full_name || 'Me',
+      date: document.getElementById('rp-date').value,
+      hours: Number(computeHours().toFixed(2)),
+      completed: document.getElementById('rp-completed').value,
+      pending: document.getElementById('rp-pending').value,
+      challenge: document.getElementById('rp-challenge').value,
+      tomorrow: document.getElementById('rp-tomorrow').value,
+    });
+    shareTextOnWhatsapp(text);
+  });
 
   document.getElementById('rp-submit').addEventListener('click', async () => {
     const payload = {
@@ -366,17 +472,29 @@ async function openReportModal(profile) {
   });
 }
 
+function renderReportTaskBox(tasks) {
+  if (!tasks.length) return '<p class="text-secondary" style="font-size:0.82rem;">Nothing here.</p>';
+  return tasks.map(reportTaskChecklistItemHtml).join('');
+}
+
+function wireReportTaskCheckboxes(onToggle) {
+  document.querySelectorAll('[data-report-task-toggle]').forEach((cb) =>
+    cb.addEventListener('change', () => toggleReportTaskStatus(cb.dataset.reportTaskToggle, cb.checked, cb, onToggle))
+  );
+}
+
 function reportTaskChecklistItemHtml(t) {
   const checked = t.status === 'Completed';
   return `<label class="checklist-item" data-report-task-row="${t.task_id}">
     <input type="checkbox" data-report-task-toggle="${t.task_id}" ${checked ? 'checked' : ''}/>
-    <span style="${checked ? 'text-decoration:line-through;color:var(--text-secondary);' : ''}">${escapeHtml(t.title)}</span>
+    <span>${escapeHtml(t.title)}</span>
   </label>`;
 }
 
 // Ticking marks the task Completed, unticking sends it back to Pending —
-// keeps the Tasks module and this report checklist in sync immediately.
-async function toggleReportTaskStatus(taskId, checked, checkboxEl) {
+// and moves the row between the two boxes immediately, without waiting
+// for the modal to reload.
+async function toggleReportTaskStatus(taskId, checked, checkboxEl, onToggle) {
   const patch = checked
     ? { status: 'Completed', progress: 100, completed_date: new Date().toISOString().slice(0, 10) }
     : { status: 'Pending', progress: 0, completed_date: null };
@@ -388,8 +506,19 @@ async function toggleReportTaskStatus(taskId, checked, checkboxEl) {
   }
   if (typeof TASKS_CACHE !== 'undefined') {
     const idx = TASKS_CACHE.findIndex((t) => t.task_id === taskId);
-    if (idx > -1) TASKS_CACHE[idx] = { ...TASKS_CACHE[idx], ...patch };
+    if (idx > -1) Object.assign(TASKS_CACHE[idx], patch);
   }
-  const label = checkboxEl.closest('[data-report-task-row]')?.querySelector('span');
-  if (label) label.style.cssText = checked ? 'text-decoration:line-through;color:var(--text-secondary);' : '';
+  const row = checkboxEl.closest('[data-report-task-row]');
+  const targetBox = document.getElementById(checked ? 'rp-task-completed' : 'rp-task-pending');
+  const sourceBox = document.getElementById(checked ? 'rp-task-pending' : 'rp-task-completed');
+  if (row && targetBox) {
+    const placeholder = sourceBox?.querySelector('p.text-secondary');
+    if (placeholder && sourceBox.children.length === 1) placeholder.remove();
+    targetBox.querySelector('p.text-secondary')?.remove();
+    targetBox.appendChild(row);
+    if (sourceBox && !sourceBox.children.length) {
+      sourceBox.innerHTML = '<p class="text-secondary" style="font-size:0.82rem;">Nothing here.</p>';
+    }
+  }
+  if (typeof onToggle === 'function') onToggle();
 }

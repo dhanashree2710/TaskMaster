@@ -21,6 +21,39 @@ async function fetchDepartments() {
   return data || [];
 }
 
+// ---------- Photo lookups ----------
+// The `users` table (used for login/admin/wall/etc.) has no photo_url of
+// its own — profile photos live on the employees/interns tables, keyed by
+// user_id. This resolves { user_id: photo_url } for a batch of user ids so
+// any screen built off `users` can still show a real photo, falling back
+// to initials wherever no photo exists (avatarHtml already does that part).
+async function fetchUserPhotoMap(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  const map = {};
+  if (!ids.length) return map;
+  try {
+    const { data } = await sb.from('employees').select('user_id, photo_url').in('user_id', ids);
+    (data || []).forEach((row) => { if (row.photo_url) map[row.user_id] = row.photo_url; });
+  } catch (e) { /* non-critical */ }
+  try {
+    const { data } = await sb.from('interns').select('user_id, photo_url').in('user_id', ids);
+    (data || []).forEach((row) => { if (row.photo_url) map[row.user_id] = row.photo_url; });
+  } catch (e) { /* non-critical */ }
+  return map;
+}
+
+// Sets an existing avatar element's content to a photo if one is given,
+// otherwise falls back to initials text — used for chrome elements
+// (sidebar/topbar) that already exist in the page markup.
+function setAvatarEl(el, name, photoUrl) {
+  if (!el) return;
+  if (photoUrl) {
+    el.innerHTML = `<img src="${escapeHtml(photoUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" />`;
+  } else {
+    el.textContent = getInitials(name);
+  }
+}
+
 // ---------- Activity log ----------
 async function logActivity(userId, activity) {
   try {
@@ -91,16 +124,33 @@ async function requestNotificationPermission() {
 // "wrong" time even though the stored value was correct.
 const OFFICE_TIMEZONE = 'Asia/Kolkata';
 
+// Postgres 'timestamp without time zone' columns (created_at, etc.) come
+// back from Supabase with no offset/Z suffix, e.g. "2026-07-23T05:12:00".
+// `new Date(...)` then parses that as LOCAL time on the viewer's device
+// instead of the UTC time it was actually stored as — on a UTC+5:30 device
+// that turns a 10-minute-old row into something that looks 5+ hours old.
+// This treats any offset-less timestamp as UTC (how it was written),
+// leaving already-tz-aware strings (with Z or +hh:mm) untouched.
+function parseDbDate(d) {
+  if (!d) return null;
+  if (d instanceof Date) return d;
+  let s = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?$/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) {
+    s = `${s.replace(' ', 'T')}Z`;
+  }
+  return new Date(s);
+}
+
 function fmtDate(d) {
   if (!d) return '-';
-  const date = new Date(d);
+  const date = parseDbDate(d);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: OFFICE_TIMEZONE });
 }
 
 function fmtDateTime(d) {
   if (!d) return '-';
-  const date = new Date(d);
+  const date = parseDbDate(d);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: OFFICE_TIMEZONE });
 }
@@ -127,7 +177,7 @@ function officeNowClock() {
 
 function fmtTimeAgo(d) {
   if (!d) return '-';
-  const diffMs = Date.now() - new Date(d).getTime();
+  const diffMs = Date.now() - parseDbDate(d).getTime();
   const mins = Math.floor(diffMs / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;

@@ -28,20 +28,29 @@ async function initMeetings(profile) {
   document.getElementById('meet-new-btn').addEventListener('click', () => openMeetingModal(profile));
   document.getElementById('meet-filter-when').addEventListener('change', renderMeetingList);
   document.getElementById('meet-filter-search').addEventListener('input', renderMeetingList);
-  await loadMeetings(profile);
+  const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
+  await loadMeetings(profile, roleMeta.canManageTeam);
 }
 
-async function loadMeetings(profile) {
-  const { data: myMeetingIds } = await sb.from('meeting_attendees').select('meeting_id').eq('user_id', profile.user_id);
-  const ids = (myMeetingIds || []).map((m) => m.meeting_id);
+async function loadMeetings(profile, canManage) {
+  let query = sb.from('meetings').select('*, host:users(user_name)').order('meeting_date', { ascending: true });
 
-  const { data, error } = await sb
-    .from('meetings')
-    .select('*, host:users(user_name)')
-    .or(`created_by.eq.${profile.user_id}${ids.length ? ',meeting_id.in.(' + ids.join(',') + ')' : ''}`)
-    .order('meeting_date', { ascending: true });
+  // Admins/managers see every meeting, same as Tasks/Attendance/Reports.
+  // Everyone else only sees meetings they created or were invited to.
+  if (!canManage) {
+    const { data: myMeetingIds, error: attErr } = await sb
+      .from('meeting_attendees')
+      .select('meeting_id')
+      .eq('user_id', profile.user_id);
+    if (attErr) console.error(attErr);
+    const ids = (myMeetingIds || []).map((m) => m.meeting_id);
+    query = query.or(`created_by.eq.${profile.user_id}${ids.length ? ',meeting_id.in.(' + ids.join(',') + ')' : ''}`);
+  }
+
+  const { data, error } = await query;
   if (error) {
     console.error(error);
+    showToast('Could not load meetings.', 'error');
     return;
   }
   MEET_CACHE = data || [];
@@ -99,7 +108,8 @@ async function deleteMeeting(meetingId, profile) {
   const { error } = await sb.from('meetings').delete().eq('meeting_id', meetingId);
   if (error) return showToast(error.message, 'error');
   showToast('Meeting deleted.', 'success');
-  loadMeetings(profile);
+  const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
+  loadMeetings(profile, roleMeta.canManageTeam);
 }
 
 async function openMeetingModal(profile) {
@@ -152,6 +162,7 @@ async function openMeetingModal(profile) {
     await logActivity(profile.user_id, `Scheduled meeting "${title}"`);
     showToast('Meeting scheduled.', 'success');
     closeModal('modal-meeting-new');
-    loadMeetings(profile);
+    const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
+    loadMeetings(profile, roleMeta.canManageTeam);
   });
 }

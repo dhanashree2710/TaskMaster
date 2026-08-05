@@ -90,7 +90,7 @@ async function initTasks(profile) {
 async function loadTasks(profile, canManage) {
   let query = sb
     .from('tasks')
-    .select('*, assignee:users!tasks_assigned_to_fkey(user_id,user_name,user_email), assigner:users!tasks_assigned_by_fkey(user_id,user_name)')
+    .select('*, assignee:users!tasks_assigned_to_fkey(user_id,user_name,user_email,role), assigner:users!tasks_assigned_by_fkey(user_id,user_name)')
     .order('due_date', { ascending: true });
 
   if (!canManage) query = query.eq('assigned_to', profile.user_id);
@@ -342,7 +342,7 @@ async function openTaskDetail(taskId) {
   if (!t) {
     const { data, error } = await sb
       .from('tasks')
-      .select('*, assignee:users!tasks_assigned_to_fkey(user_id,user_name,user_email), assigner:users!tasks_assigned_by_fkey(user_id,user_name)')
+      .select('*, assignee:users!tasks_assigned_to_fkey(user_id,user_name,user_email,role), assigner:users!tasks_assigned_by_fkey(user_id,user_name)')
       .eq('task_id', taskId)
       .maybeSingle();
     if (error || !data) return showToast('Could not load that task.', 'error');

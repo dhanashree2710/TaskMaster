@@ -63,6 +63,7 @@ function renderAttendanceSection() {
       <div class="filter-bar">
         <input type="month" class="form-control-tm" id="att-month-input" />
         <span class="filter-count" id="att-month-count"></span>
+        <button class="btn-sm-ghost" id="att-month-download-btn" style="display:none;margin-left:auto;"><i class="fa-solid fa-download"></i> Download sheet</button>
       </div>
       <div class="tm-table-wrap">
         <table class="tm-table">
@@ -126,6 +127,10 @@ async function initAttendance(profile) {
     const downloadBtn = document.getElementById('att-download-btn');
     downloadBtn.style.display = '';
     downloadBtn.addEventListener('click', downloadAttendanceCsv);
+
+    const monthDownloadBtn = document.getElementById('att-month-download-btn');
+    monthDownloadBtn.style.display = '';
+    monthDownloadBtn.addEventListener('click', downloadMonthlyAttendanceSheet);
   }
 
   await loadAttendance(profile, canManage);
@@ -232,6 +237,54 @@ function downloadAttendanceCsv() {
   const a = document.createElement('a');
   a.href = url;
   a.download = `attendance-sheet-${officeTodayStr()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---------- Monthly muster sheet: one row per person, one column per day ----------
+// Cell codes: P = Present, L = Late (counts as present), HD = Half Day, A = Absent, - = no record.
+function downloadMonthlyAttendanceSheet() {
+  const month = document.getElementById('att-month-input')?.value || ATT_MONTH_KEY;
+  if (!month) return showToast('Pick a month first.', 'error');
+
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+
+  if (!ATT_MONTH_DATA.length) return showToast('No attendance records to export for this month.', 'error');
+
+  const STATUS_CODE = { Present: 'P', Late: 'L', 'Half Day': 'HD', Absent: 'A' };
+
+  // person_id -> { name, role, days: { 1: 'P', 2: 'A', ... } }
+  const byPerson = new Map();
+  ATT_MONTH_DATA.forEach((a) => {
+    if (!byPerson.has(a.user_id)) {
+      byPerson.set(a.user_id, { name: a.person?.user_name || '-', role: a.person?.role || '-', days: {} });
+    }
+    const day = Number(String(a.attendance_date).slice(8, 10));
+    byPerson.get(a.user_id).days[day] = STATUS_CODE[a.status] || '-';
+  });
+
+  const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => String(i + 1));
+  const header = ['Name', 'Role', ...dayHeaders, 'Present Total', 'Absent Total', 'Half Day Total'];
+
+  const lines = [...byPerson.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((p) => {
+      const dayCells = dayHeaders.map((d) => p.days[d] || '-');
+      const presentTotal = dayCells.filter((c) => c === 'P' || c === 'L').length;
+      const absentTotal = dayCells.filter((c) => c === 'A').length;
+      const halfDayTotal = dayCells.filter((c) => c === 'HD').length;
+      return [p.name, p.role, ...dayCells, presentTotal, absentTotal, halfDayTotal];
+    });
+
+  const csv = [header, ...lines].map((r) => r.map(csvEscapeAtt).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `attendance-monthly-sheet-${month}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -389,6 +442,9 @@ function openAttendanceEditModal(attendanceId) {
 }
 
 // ---------- Monthly summary (own record, or everyone's if you can manage the team) ----------
+let ATT_MONTH_DATA = [];
+let ATT_MONTH_KEY = null;
+
 async function renderMonthlySummary(canManage) {
   const profile = getStoredUser();
   const month = document.getElementById('att-month-input')?.value;
@@ -406,6 +462,9 @@ async function renderMonthlySummary(canManage) {
     body.innerHTML = `<tr class="tm-empty-row"><td colspan="7">Could not load the monthly summary.</td></tr>`;
     return;
   }
+
+  ATT_MONTH_DATA = data || [];
+  ATT_MONTH_KEY = month;
 
   const byPerson = new Map();
   (data || []).forEach((a) => {

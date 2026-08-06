@@ -88,6 +88,16 @@ const TASK_STATUS_COLORS = { Pending: '#4fb0ff', 'In Progress': '#ffb648', Compl
 // Builds a plain-text summary (WhatsApp *bold* markup) from a report's
 // fields, then opens wa.me with that text pre-filled so the user picks
 // who to send it to — no contact/number is baked in.
+// Task lines may include description under the title when available.
+function formatTaskLine(title, description) {
+  const t = (title || '').trim() || 'Untitled task';
+  const d = (description || '').trim();
+  if (!d) return `- ${t}`;
+  // Indent description under the title for readable WhatsApp formatting
+  const descLines = d.split(/\r?\n/).map((line) => `  ${line.trim()}`).filter(Boolean);
+  return [`- ${t}`, ...descLines].join('\n');
+}
+
 function buildReportShareText({ name, date, hours, completed, pending, challenge, tomorrow }) {
   const lines = [
     `*Daily Report - ${name}*`,
@@ -370,15 +380,16 @@ async function openReportModal(profile) {
   // "Completed work": only tasks completed on the report's date (usually
   // today) — not everything that happens to be Completed right now.
   // "Pending work": all of your open tasks, regardless of date.
+  // Includes task description under the title when present.
   const buildCompletedText = (dateStr) =>
     myTasks
       .filter((t) => t.status === 'Completed' && t.completed_date === dateStr)
-      .map((t) => `- ${t.title}`)
+      .map((t) => formatTaskLine(t.title, t.description))
       .join('\n');
   const buildPendingText = () =>
     myTasks
       .filter((t) => t.status !== 'Completed')
-      .map((t) => `- ${t.title}`)
+      .map((t) => formatTaskLine(t.title, t.description))
       .join('\n');
 
   const html = `

@@ -99,7 +99,7 @@ async function openEmployeeDetail(id) {
   const profile = getStoredUser();
   const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
   const e = EMP_CACHE.find((x) => x.employee_id === id);
-  if (!e) return;
+  if (!e) return showToast('Employee not found in list. Refresh and try again.', 'error');
   const canEdit = roleMeta.canManageTeam;
 
   const html = `
@@ -108,15 +108,24 @@ async function openEmployeeDetail(id) {
         <div class="tm-modal-head"><h3>${escapeHtml(fullName(e))}</h3><button class="tm-modal-close" data-close-modal="modal-emp-detail">&times;</button></div>
         <div class="detail-grid mb-3">
           <div><div class="dl-label">Employee code</div><div class="dl-value">${escapeHtml(e.employee_code || '-')}</div></div>
-          <div><div class="dl-label">Email</div><div class="dl-value">${escapeHtml(e.email || '-')}</div></div>
-          <div><div class="dl-label">Phone</div><div class="dl-value">${escapeHtml(e.phone || '-')}</div></div>
-          <div><div class="dl-label">Joining date</div><div class="dl-value">${fmtDate(e.joining_date)}</div></div>
           <div><div class="dl-label">Login role</div><div class="dl-value">${escapeHtml(e.account?.role || '-')}</div></div>
           <div><div class="dl-label">Account status</div><div class="dl-value">${escapeHtml(e.account?.status || '-')}</div></div>
+          <div><div class="dl-label">Joining date</div><div class="dl-value">${canEdit ? '' : fmtDate(e.joining_date)}</div>
+            ${canEdit ? `<input type="date" class="form-control-glass" style="padding-left:1rem;" id="ed-joining" value="${e.joining_date || ''}" />` : ''}
+          </div>
         </div>
 
         ${renderPhotoField('ed-photo', { label: 'Photo', url: e.photo_url || '' })}
 
+        <div class="field-row">
+          <div class="field"><label>First name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-first" value="${escapeHtml(e.first_name || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Middle name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-middle" value="${escapeHtml(e.middle_name || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Last name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-last" value="${escapeHtml(e.last_name || '')}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Email</label><input type="email" class="form-control-glass" style="padding-left:1rem;" id="ed-email" value="${escapeHtml(e.email || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Phone</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-phone" value="${escapeHtml(e.phone || '')}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
         <div class="field-row">
           <div class="field"><label>Designation</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-designation" value="${escapeHtml(e.designation || '')}" ${canEdit ? '' : 'disabled'} /></div>
           <div class="field"><label>Department</label>
@@ -127,7 +136,7 @@ async function openEmployeeDetail(id) {
           </div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Phone</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-phone" value="${escapeHtml(e.phone || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Salary</label><input type="number" class="form-control-glass" style="padding-left:1rem;" id="ed-salary" value="${e.salary != null ? e.salary : ''}" ${canEdit ? '' : 'disabled'} /></div>
           <div class="field"><label>Status</label>
             <select class="form-control-glass" id="ed-status" ${canEdit ? '' : 'disabled'}>
               <option ${e.status === 'Active' ? 'selected' : ''}>Active</option>
@@ -135,33 +144,67 @@ async function openEmployeeDetail(id) {
             </select>
           </div>
         </div>
+        <div class="field"><label>Address</label><textarea class="form-control-glass" id="ed-address" ${canEdit ? '' : 'disabled'}>${escapeHtml(e.address || '')}</textarea></div>
+        <div class="field-row">
+          <div class="field"><label>City</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-city" value="${escapeHtml(e.city || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>State</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-state" value="${escapeHtml(e.state || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Pincode</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="ed-pincode" value="${escapeHtml(e.pincode || '')}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
 
         ${canEdit ? `<div class="tm-modal-actions">
           <button class="btn-sm-ghost" data-close-modal="modal-emp-detail">Close</button>
           <button class="btn-sm-gradient" id="ed-save">Save changes</button>
-        </div>` : ''}
+        </div>` : `<div class="tm-modal-actions"><button class="btn-sm-ghost" data-close-modal="modal-emp-detail">Close</button></div>
+          <p class="text-secondary" style="font-size:0.82rem;">Only Manager / Admin can edit employee records.</p>`}
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
-  wirePhotoField('ed-photo', STORAGE_BUCKETS.employeePhotos);
+  if (typeof wirePhotoField === 'function') wirePhotoField('ed-photo', STORAGE_BUCKETS.employeePhotos);
 
   document.getElementById('ed-save')?.addEventListener('click', async () => {
-    const patch = {
-      designation: document.getElementById('ed-designation').value.trim(),
-      department_id: document.getElementById('ed-department').value || null,
-      phone: document.getElementById('ed-phone').value.trim(),
-      status: document.getElementById('ed-status').value,
-      photo_url: document.getElementById('ed-photo').value.trim() || null,
-    };
-    const { error } = await sb.from('employees').update(patch).eq('employee_id', id);
-    if (error) return showToast(error.message, 'error');
+    const btn = document.getElementById('ed-save');
+    btn.disabled = true;
+    try {
+      const patch = {
+        first_name: document.getElementById('ed-first').value.trim() || null,
+        middle_name: document.getElementById('ed-middle').value.trim() || null,
+        last_name: document.getElementById('ed-last').value.trim() || null,
+        email: document.getElementById('ed-email').value.trim() || null,
+        designation: document.getElementById('ed-designation').value.trim() || null,
+        department_id: document.getElementById('ed-department').value || null,
+        phone: document.getElementById('ed-phone').value.trim() || null,
+        status: document.getElementById('ed-status').value,
+        photo_url: document.getElementById('ed-photo')?.value?.trim() || null,
+        salary: document.getElementById('ed-salary').value !== '' ? Number(document.getElementById('ed-salary').value) : null,
+        address: document.getElementById('ed-address').value.trim() || null,
+        city: document.getElementById('ed-city').value.trim() || null,
+        state: document.getElementById('ed-state').value.trim() || null,
+        pincode: document.getElementById('ed-pincode').value.trim() || null,
+        joining_date: document.getElementById('ed-joining')?.value || e.joining_date || null,
+      };
+      const { error } = await sb.from('employees').update(patch).eq('employee_id', id);
+      if (error) {
+        console.error('Employee update failed', error);
+        return showToast(error.message || 'Could not save employee. Check permissions / RLS.', 'error');
+      }
 
-    if (e.user_id) {
-      await sb.from('users').update({ status: patch.status }).eq('user_id', e.user_id);
+      if (e.user_id) {
+        const userPatch = { status: patch.status };
+        if (patch.email) userPatch.user_email = patch.email;
+        const name = [patch.first_name, patch.middle_name, patch.last_name].filter(Boolean).join(' ');
+        if (name) userPatch.user_name = name;
+        const { error: uErr } = await sb.from('users').update(userPatch).eq('user_id', e.user_id);
+        if (uErr) console.warn('users table update', uErr);
+      }
+      if (typeof logActivity === 'function') await logActivity(profile.user_id, `Updated employee ${fullName({ ...e, ...patch })}`);
+      showToast('Employee updated.', 'success');
+      closeModal('modal-emp-detail');
+      loadEmployees();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Save failed', 'error');
+    } finally {
+      btn.disabled = false;
     }
-    await logActivity(profile.user_id, `Updated employee ${fullName(e)}`);
-    showToast('Employee updated.', 'success');
-    closeModal('modal-emp-detail');
-    loadEmployees();
   });
 }

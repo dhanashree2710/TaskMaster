@@ -92,28 +92,40 @@ async function openInternDetail(id) {
   const profile = getStoredUser();
   const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
   const i = INT_CACHE.find((x) => x.intern_id === id);
-  if (!i) return;
+  if (!i) return showToast('Intern not found in list. Refresh and try again.', 'error');
   const canEdit = roleMeta.canManageTeam;
 
   const html = `
     <div class="tm-modal-backdrop show" id="modal-int-detail">
       <div class="tm-modal wide">
         <div class="tm-modal-head"><h3>${escapeHtml(fullName(i))}</h3><button class="tm-modal-close" data-close-modal="modal-int-detail">&times;</button></div>
-        <div class="detail-grid mb-3">
-          <div><div class="dl-label">Email</div><div class="dl-value">${escapeHtml(i.email || '-')}</div></div>
-          <div><div class="dl-label">College</div><div class="dl-value">${escapeHtml(i.college || '-')}</div></div>
-          <div><div class="dl-label">Start date</div><div class="dl-value">${fmtDate(i.start_date)}</div></div>
-          <div><div class="dl-label">End date</div><div class="dl-value">${fmtDate(i.end_date)}</div></div>
-        </div>
 
         ${renderPhotoField('id-photo', { label: 'Photo', url: i.photo_url || '' })}
 
+        <div class="field-row">
+          <div class="field"><label>First name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="id-first" value="${escapeHtml(i.first_name || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Middle name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="id-middle" value="${escapeHtml(i.middle_name || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Last name</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="id-last" value="${escapeHtml(i.last_name || '')}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Email</label><input type="email" class="form-control-glass" style="padding-left:1rem;" id="id-email" value="${escapeHtml(i.email || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Phone</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="id-phone" value="${escapeHtml(i.phone || '')}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>College</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="id-college" value="${escapeHtml(i.college || '')}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>Duration</label><input type="text" class="form-control-glass" style="padding-left:1rem;" id="id-duration" value="${escapeHtml(i.duration || '')}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Start date</label><input type="date" class="form-control-glass" style="padding-left:1rem;" id="id-start" value="${i.start_date || ''}" ${canEdit ? '' : 'disabled'} /></div>
+          <div class="field"><label>End date</label><input type="date" class="form-control-glass" style="padding-left:1rem;" id="id-end" value="${i.end_date || ''}" ${canEdit ? '' : 'disabled'} /></div>
+        </div>
         <div class="field"><label>Project</label><textarea class="form-control-glass" id="id-project" ${canEdit ? '' : 'disabled'}>${escapeHtml(i.project || '')}</textarea></div>
+        <div class="field"><label>Skills</label><textarea class="form-control-glass" id="id-skills" ${canEdit ? '' : 'disabled'}>${escapeHtml(i.skills || '')}</textarea></div>
         <div class="field-row">
           <div class="field"><label>Mentor</label>
             <select class="form-control-glass" id="id-mentor" ${canEdit ? '' : 'disabled'}>
               <option value="">None</option>
-              ${INT_MENTORS.map((m) => `<option value="${m.employee_id}" ${m.employee_id === i.mentor ? 'selected' : ''}>${escapeHtml(fullName(m))}</option>`).join('')}
+              ${(INT_MENTORS || []).map((m) => `<option value="${m.employee_id}" ${m.employee_id === i.mentor ? 'selected' : ''}>${escapeHtml(fullName(m))}</option>`).join('')}
             </select>
           </div>
           <div class="field"><label>Status</label>
@@ -127,26 +139,55 @@ async function openInternDetail(id) {
         ${canEdit ? `<div class="tm-modal-actions">
           <button class="btn-sm-ghost" data-close-modal="modal-int-detail">Close</button>
           <button class="btn-sm-gradient" id="id-save">Save changes</button>
-        </div>` : ''}
+        </div>` : `<div class="tm-modal-actions"><button class="btn-sm-ghost" data-close-modal="modal-int-detail">Close</button></div>
+          <p class="text-secondary" style="font-size:0.82rem;">Only Manager / Admin can edit intern records.</p>`}
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
-  wirePhotoField('id-photo', STORAGE_BUCKETS.internPhotos);
+  if (typeof wirePhotoField === 'function') wirePhotoField('id-photo', STORAGE_BUCKETS.internPhotos);
 
   document.getElementById('id-save')?.addEventListener('click', async () => {
-    const patch = {
-      project: document.getElementById('id-project').value.trim(),
-      mentor: document.getElementById('id-mentor').value || null,
-      status: document.getElementById('id-status').value,
-      evaluation: document.getElementById('id-eval').value.trim(),
-      photo_url: document.getElementById('id-photo').value.trim() || null,
-    };
-    const { error } = await sb.from('interns').update(patch).eq('intern_id', id);
-    if (error) return showToast(error.message, 'error');
-    if (i.user_id) await sb.from('users').update({ status: patch.status === 'Active' ? 'Active' : 'Inactive' }).eq('user_id', i.user_id);
-    await logActivity(profile.user_id, `Updated intern ${fullName(i)}`);
-    showToast('Intern updated.', 'success');
-    closeModal('modal-int-detail');
-    loadInterns();
+    const btn = document.getElementById('id-save');
+    btn.disabled = true;
+    try {
+      const patch = {
+        first_name: document.getElementById('id-first').value.trim() || null,
+        middle_name: document.getElementById('id-middle').value.trim() || null,
+        last_name: document.getElementById('id-last').value.trim() || null,
+        email: document.getElementById('id-email').value.trim() || null,
+        phone: document.getElementById('id-phone').value.trim() || null,
+        college: document.getElementById('id-college').value.trim() || null,
+        duration: document.getElementById('id-duration').value.trim() || null,
+        start_date: document.getElementById('id-start').value || null,
+        end_date: document.getElementById('id-end').value || null,
+        project: document.getElementById('id-project').value.trim() || null,
+        skills: document.getElementById('id-skills').value.trim() || null,
+        mentor: document.getElementById('id-mentor').value || null,
+        status: document.getElementById('id-status').value,
+        evaluation: document.getElementById('id-eval').value.trim() || null,
+        photo_url: document.getElementById('id-photo')?.value?.trim() || null,
+      };
+      const { error } = await sb.from('interns').update(patch).eq('intern_id', id);
+      if (error) {
+        console.error('Intern update failed', error);
+        return showToast(error.message || 'Could not save intern. Check permissions / RLS.', 'error');
+      }
+      if (i.user_id) {
+        const userPatch = { status: patch.status === 'Active' ? 'Active' : 'Inactive' };
+        if (patch.email) userPatch.user_email = patch.email;
+        const name = [patch.first_name, patch.middle_name, patch.last_name].filter(Boolean).join(' ');
+        if (name) userPatch.user_name = name;
+        await sb.from('users').update(userPatch).eq('user_id', i.user_id);
+      }
+      if (typeof logActivity === 'function') await logActivity(profile.user_id, `Updated intern ${fullName({ ...i, ...patch })}`);
+      showToast('Intern updated.', 'success');
+      closeModal('modal-int-detail');
+      loadInterns();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Save failed', 'error');
+    } finally {
+      btn.disabled = false;
+    }
   });
 }

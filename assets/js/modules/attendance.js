@@ -461,29 +461,46 @@ function openAttendanceEditModal(attendanceId) {
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
 
-  document.getElementById('ae-save').addEventListener('click', async () => {
-    const checkInTime = document.getElementById('ae-checkin').value;
-    const checkOutTime = document.getElementById('ae-checkout').value;
-    const status = document.getElementById('ae-status').value;
-    const remarks = document.getElementById('ae-remarks').value.trim();
+  document.getElementById('ae-save')?.addEventListener('click', async () => {
+    const btn = document.getElementById('ae-save');
+    if (btn) btn.disabled = true;
+    try {
+      if (!canManage) {
+        return showToast('Only Manager / Admin can edit attendance records.', 'error');
+      }
+      const checkInTime = document.getElementById('ae-checkin').value;
+      const checkOutTime = document.getElementById('ae-checkout').value;
+      const status = document.getElementById('ae-status').value;
+      const remarks = document.getElementById('ae-remarks').value.trim();
 
-    const check_in = officeDateTimeToIso(a.attendance_date, checkInTime);
-    const check_out = officeDateTimeToIso(a.attendance_date, checkOutTime);
-    let working_hours = a.working_hours;
-    if (check_in && check_out) {
-      working_hours = Math.max(0, (new Date(check_out) - new Date(check_in)) / 3600000).toFixed(2);
+      const check_in = checkInTime ? officeDateTimeToIso(a.attendance_date, checkInTime) : null;
+      const check_out = checkOutTime ? officeDateTimeToIso(a.attendance_date, checkOutTime) : null;
+      let working_hours = a.working_hours;
+      if (check_in && check_out) {
+        working_hours = Math.max(0, (new Date(check_out) - new Date(check_in)) / 3600000).toFixed(2);
+      }
+
+      const { error } = await sb
+        .from('attendance')
+        .update({ check_in, check_out, status, remarks: remarks || null, working_hours })
+        .eq('attendance_id', attendanceId);
+      if (error) {
+        console.error('Attendance update failed', error);
+        return showToast(error.message || 'Could not save attendance. Check permissions / RLS.', 'error');
+      }
+
+      if (typeof logActivity === 'function') {
+        await logActivity(profile.user_id, `Edited attendance for ${a.person?.user_name || 'a user'} on ${a.attendance_date}`);
+      }
+      showToast('Attendance updated.', 'success');
+      closeModal('modal-att-edit');
+      loadAttendance(profile, canManage);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Save failed', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
-
-    const { error } = await sb
-      .from('attendance')
-      .update({ check_in, check_out, status, remarks: remarks || null, working_hours })
-      .eq('attendance_id', attendanceId);
-    if (error) return showToast(error.message, 'error');
-
-    await logActivity(profile.user_id, `Edited attendance for ${a.person?.user_name || 'a user'} on ${a.attendance_date}`);
-    showToast('Attendance updated.', 'success');
-    closeModal('modal-att-edit');
-    loadAttendance(profile, canManage);
   });
 
   document.getElementById('ae-delete').addEventListener('click', async () => {

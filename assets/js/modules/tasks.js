@@ -532,39 +532,55 @@ async function openTaskDetail(taskId) {
     loadTasks(profile, canManage);
   });
 
-  document.getElementById('td-save').addEventListener('click', async () => {
-    const status = document.getElementById('td-status').value;
-    const progress = Number(document.getElementById('td-progress').value);
-    const patch = { status, progress };
-    if (status === 'Completed') patch.completed_date = new Date().toISOString().slice(0, 10);
+  document.getElementById('td-save')?.addEventListener('click', async () => {
+    const btn = document.getElementById('td-save');
+    if (btn) btn.disabled = true;
+    try {
+      if (!canManage && !isOwner) {
+        return showToast('You do not have permission to edit this task.', 'error');
+      }
+      const status = document.getElementById('td-status').value;
+      const progress = Number(document.getElementById('td-progress').value);
+      const patch = { status, progress };
+      if (status === 'Completed') patch.completed_date = new Date().toISOString().slice(0, 10);
+      else patch.completed_date = null;
 
-    let reassigned = false;
-    if (canManage) {
-      const newTitle = document.getElementById('td-title').value.trim();
-      if (!newTitle) return showToast('Give the task a title.', 'error');
-      patch.title = newTitle;
-      patch.description = document.getElementById('td-desc').value.trim();
-      const newAssignee = document.getElementById('td-assignee').value;
-      reassigned = newAssignee !== t.assigned_to;
-      patch.assigned_to = newAssignee;
-      patch.department_id = document.getElementById('td-dept').value || null;
-      patch.priority = document.getElementById('td-priority').value;
-      patch.due_date = document.getElementById('td-due').value || null;
-    }
+      let reassigned = false;
+      if (canManage) {
+        const newTitle = document.getElementById('td-title')?.value?.trim();
+        if (!newTitle) return showToast('Give the task a title.', 'error');
+        patch.title = newTitle;
+        patch.description = document.getElementById('td-desc')?.value?.trim() || null;
+        const newAssignee = document.getElementById('td-assignee')?.value;
+        reassigned = newAssignee && newAssignee !== t.assigned_to;
+        if (newAssignee) patch.assigned_to = newAssignee;
+        patch.department_id = document.getElementById('td-dept')?.value || null;
+        patch.priority = document.getElementById('td-priority')?.value || t.priority;
+        patch.due_date = document.getElementById('td-due')?.value || null;
+      }
 
-    const { error } = await sb.from('tasks').update(patch).eq('task_id', taskId);
-    if (error) return showToast(error.message, 'error');
+      const { error } = await sb.from('tasks').update(patch).eq('task_id', taskId);
+      if (error) {
+        console.error('Task update failed', error);
+        return showToast(error.message || 'Could not save task. Check permissions / RLS.', 'error');
+      }
 
-    if (status === 'Completed') {
-      await notifyUsers([t.assigned_by], 'Task completed', `${profile.user_name} completed "${t.title}"`, 'page-tasks');
+      if (status === 'Completed' && typeof notifyUsers === 'function') {
+        await notifyUsers([t.assigned_by], 'Task completed', `${profile.user_name} completed "${t.title}"`, 'page-tasks');
+      }
+      if (reassigned && typeof notifyUsers === 'function') {
+        await notifyUsers([patch.assigned_to], 'Task assigned to you', `${profile.user_name} assigned you "${patch.title}"`, 'page-tasks');
+      }
+      if (typeof logActivity === 'function') await logActivity(profile.user_id, `Updated task "${patch.title || t.title}"`);
+      showToast('Task updated.', 'success');
+      closeModal('modal-task-detail');
+      loadTasks(profile, canManage);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Save failed', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    if (reassigned) {
-      await notifyUsers([patch.assigned_to], 'Task assigned to you', `${profile.user_name} assigned you "${patch.title}"`, 'page-tasks');
-    }
-    await logActivity(profile.user_id, `Updated task "${patch.title || t.title}"`);
-    showToast('Task updated.', 'success');
-    closeModal('modal-task-detail');
-    loadTasks(profile, canManage);
   });
 }
 

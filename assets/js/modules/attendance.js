@@ -137,12 +137,33 @@ async function initAttendance(profile) {
 }
 
 async function loadAttendance(profile, canManage) {
-  let query = sb.from('attendance').select('*, person:users(user_name, role)').order('attendance_date', { ascending: false }).limit(300);
+  // Prefer explicit FK; fall back to plain select + client-side names if embed fails (PGRST201)
+  let query = sb
+    .from('attendance')
+    .select('*, person:users!attendance_user_id_fkey(user_name, role)')
+    .order('attendance_date', { ascending: false })
+    .limit(300);
   if (!canManage) query = query.eq('user_id', profile.user_id);
-  const { data, error } = await query;
+  let { data, error } = await query;
   if (error) {
-    console.error(error);
-    return;
+    console.warn('attendance embed failed, falling back', error);
+    const fb = await sb.from('attendance').select('*').order('attendance_date', { ascending: false }).limit(300);
+    data = fb.data;
+    error = fb.error;
+    if (error) {
+      console.error(error);
+      return;
+    }
+    if (canManage && data?.length) {
+      try {
+        const users = await fetchActiveUsers();
+        const map = {};
+        (users || []).forEach((u) => {
+          map[u.user_id] = { user_name: u.user_name, role: u.role };
+        });
+        data = data.map((a) => ({ ...a, person: map[a.user_id] || { user_name: '—', role: '' } }));
+      } catch (_) {}
+    }
   }
   ATT_CACHE = data || [];
 
@@ -323,6 +344,40 @@ async function checkIn(profile) {
 async function checkOut(profile) {
   if (!ATT_TODAY) return;
   const now = new Date();
+  const today = officeTodayStr();
+
+  // Mandatory daily report before checkout.
+  // Only submission is required — manager review must never block checkout.
+  try {
+    const { data: report, error: reportErr } = await sb
+      .from('daily_reports')
+      .select('report_id, status')
+      .eq('user_id', profile.user_id)
+      .eq('report_date', today)
+      .maybeSingle();
+
+    // Treat any existing row for today as submitted (backward-compatible
+    // with schemas that do not yet have a status column). Prefer explicit
+    // status when present.
+    const hasSubmitted =
+      report &&
+      (!report.status || report.status === 'Submitted' || report.status === 'Reviewed');
+
+    if (reportErr || !hasSubmitted) {
+      showToast('Daily report required. Please complete today\'s work report before checking out.', 'error');
+      // Open the report modal so the employee can finish it immediately.
+      if (typeof openReportModal === 'function') {
+        openReportModal(profile);
+      } else {
+        // Fallback: navigate to Reports section if modal helper is unavailable.
+        const reportsNav = document.querySelector('[data-nav="page-reports"]');
+        if (reportsNav) reportsNav.click();
+      }
+      return;
+    }
+  } catch (e) {
+    console.warn('Report check failed, allowing checkout as fallback', e);
+  }
 
   // Re-read the row's check_in fresh from the database right before doing
   // the math. Using the in-memory ATT_TODAY.check_in here caused a real

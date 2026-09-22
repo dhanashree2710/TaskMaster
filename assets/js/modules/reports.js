@@ -263,14 +263,40 @@ function renderTaskReportPeople(byPerson) {
 }
 
 async function loadReports(profile, canManage) {
-  let query = sb.from('daily_reports').select('*, person:users(user_name)').order('report_date', { ascending: false }).limit(200);
+  // Never embed users — daily_reports can have multiple FKs to users
+  // (user_id, approved_by, reviewed_by) which triggers PGRST201.
+  // Resolve names client-side instead.
+  let query = sb
+    .from('daily_reports')
+    .select('*')
+    .order('report_date', { ascending: false })
+    .limit(200);
   if (!canManage) query = query.eq('user_id', profile.user_id);
   const { data, error } = await query;
   if (error) {
-    console.error(error);
+    console.error('loadReports', error);
     return;
   }
-  REP_CACHE = data || [];
+
+  const rows = data || [];
+  let nameMap = {};
+  if (canManage && rows.length) {
+    try {
+      const users = await fetchActiveUsers();
+      (users || []).forEach((u) => {
+        nameMap[u.user_id] = { user_name: u.user_name, role: u.role };
+      });
+    } catch (e) {
+      console.warn('Could not load user names for reports', e);
+    }
+  } else if (!canManage) {
+    nameMap[profile.user_id] = { user_name: profile.user_name, role: profile.role };
+  }
+
+  REP_CACHE = rows.map((r) => ({
+    ...r,
+    person: nameMap[r.user_id] || { user_name: '—', role: '' },
+  }));
   renderReportList();
 }
 
@@ -470,16 +496,29 @@ async function openReportModal(profile) {
       pending_work: document.getElementById('rp-pending').value.trim(),
       challenge: document.getElementById('rp-challenge').value.trim(),
       tomorrow_plan: document.getElementById('rp-tomorrow').value.trim(),
+      status: 'Submitted', // enables checkout lock; ignored if column not yet migrated
     };
-    const { error } = await sb.from('daily_reports').insert(payload);
-    if (error) return showToast(error.message, 'error');
+    // Prefer upsert so re-submitting the same day updates rather than errors
+    const { error } = await sb
+      .from('daily_reports')
+      .upsert(payload, { onConflict: 'user_id,report_date' })
+      .select();
+    // Fallback for older schemas that lack unique(user_id, report_date) or status
+    if (error) {
+      const { error: insertErr } = await sb.from('daily_reports').insert(payload);
+      if (insertErr) return showToast(insertErr.message, 'error');
+    }
     await logActivity(profile.user_id, 'Submitted a daily report');
-    showToast('Report submitted.', 'success');
+    showToast('Report submitted. You can now check out.', 'success');
     closeModal('modal-report-new');
     const roleMeta = ROLE_LABELS[profile.role] || ROLE_LABELS.Employee;
     loadReports(profile, roleMeta.canManageTeam);
     const canManageTasks = roleMeta.canManageTeam;
     if (typeof loadTasks === 'function') loadTasks(profile, canManageTasks);
+    // Refresh attendance UI so checkout button reflects the new report state
+    if (typeof loadAttendance === 'function') {
+      loadAttendance(profile, roleMeta.canManageTeam);
+    }
   });
 }
 

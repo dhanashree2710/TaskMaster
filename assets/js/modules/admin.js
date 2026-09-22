@@ -330,7 +330,15 @@ async function addHoliday(profile) {
 }
 
 async function loadActivityLog() {
-  const { data } = await sb.from('activity_logs').select('*, person:users(user_name)').order('created_at', { ascending: false }).limit(100);
+  let { data, error } = await sb
+    .from('activity_logs')
+    .select('*, person:users!activity_logs_user_id_fkey(user_name)')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) {
+    const fb = await sb.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
+    data = fb.data;
+  }
   const body = document.getElementById('activity-body');
   body.innerHTML = (data || []).length
     ? data.map((a) => `<tr><td>${fmtTimeAgo(a.created_at)}</td><td>${escapeHtml(a.person?.user_name || 'System')}</td><td>${escapeHtml(a.activity)}</td></tr>`).join('')
